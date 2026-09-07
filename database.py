@@ -5,35 +5,42 @@ import shutil
 import sqlite3
 from datetime import date
 
-# Resolve o diretorio de dados gravavel:
-# 1. Variavel de ambiente SISTEMA_DADOS_DIR (prioridade maxima)
-# 2. /mount/data/dados  (Streamlit Cloud – disco efemero gravavel)
-# 3. diretorio do script + /dados  (execucao local)
-# 4. /tmp/sistema_funcionarios/dados (fallback para ambientes somente leitura)
-def _diretorio_gravavel(caminho):
-    """Retorna caminho se for gravavel (cria subpasta e testa escrita), ou None."""
-    try:
-        os.makedirs(caminho, exist_ok=True)
-        teste = os.path.join(caminho, ".write_test")
-        with open(teste, "w") as f:
-            f.write("ok")
-        os.remove(teste)
-        return caminho
-    except (OSError, PermissionError):
-        return None
+def _descobrir_dados_dir():
+    """Descobre um diretorio gravavel para o banco de dados.
+
+    Ordem de prioridade:
+    1. SISTEMA_DADOS_DIR (variavel de ambiente)
+    2. /mount/data/dados  (Streamlit Cloud – disco efemero gravavel)
+    3. <pasta do script>/dados  (execucao local)
+    4. /tmp/sistema_funcionarios/dados (fallback universal)
+    """
+    env_dir = os.environ.get("SISTEMA_DADOS_DIR")
+    if env_dir:
+        return env_dir
+
+    candidatos = [
+        os.path.join("/mount", "data", "dados"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados"),
+        os.path.join("/tmp", "sistema_funcionarios", "dados"),
+    ]
+    for c in candidatos:
+        try:
+            os.makedirs(c, exist_ok=True)
+            teste = os.path.join(c, ".write_test")
+            with open(teste, "w") as f:
+                f.write("ok")
+            os.remove(teste)
+            return c
+        except (OSError, PermissionError):
+            continue
+
+    # Ultimo recurso absoluto
+    fallback = os.path.join("/tmp", "sistema_funcionarios", "dados")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
 
 
-_DADOS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados")
-_DADOS_CLOUD = os.path.join("/mount", "data", "dados")
-_DADOS_TMP = os.path.join("/tmp", "sistema_funcionarios", "dados")
-
-DADOS_DIR = (
-    os.environ.get("SISTEMA_DADOS_DIR")
-    or _diretorio_gravavel(_DADOS_CLOUD)
-    or _diretorio_gravavel(_DADOS_SCRIPT)
-    or _diretorio_gravavel(_DADOS_TMP)
-    or _DADOS_TMP  # ultimo recurso – /tmp sempre gravavel
-)
+DADOS_DIR = _descobrir_dados_dir()
 DB_PATH = os.path.join(DADOS_DIR, "funcionarios.db")
 FOTOS_DIR = os.path.join(DADOS_DIR, "fotos")
 
@@ -42,11 +49,22 @@ class Banco:
     """Acesso ao banco SQLite com WAL para multiusuario."""
 
     def __init__(self, multiusuario=False):
-        os.makedirs(DADOS_DIR, exist_ok=True)
-        os.makedirs(FOTOS_DIR, exist_ok=True)
+        global DADOS_DIR, DB_PATH, FOTOS_DIR
         self.multiusuario = multiusuario
-        self.conn = sqlite3.connect(DB_PATH, timeout=30,
-                                     check_same_thread=False)
+        # Tenta conectar no caminho principal; se falhar, usa /tmp
+        try:
+            os.makedirs(DADOS_DIR, exist_ok=True)
+            os.makedirs(FOTOS_DIR, exist_ok=True)
+            self.conn = sqlite3.connect(DB_PATH, timeout=30,
+                                         check_same_thread=False)
+        except (sqlite3.OperationalError, OSError, PermissionError):
+            DADOS_DIR = os.path.join("/tmp", "sistema_funcionarios", "dados")
+            DB_PATH = os.path.join(DADOS_DIR, "funcionarios.db")
+            FOTOS_DIR = os.path.join(DADOS_DIR, "fotos")
+            os.makedirs(DADOS_DIR, exist_ok=True)
+            os.makedirs(FOTOS_DIR, exist_ok=True)
+            self.conn = sqlite3.connect(DB_PATH, timeout=30,
+                                         check_same_thread=False)
         if multiusuario:
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.row_factory = sqlite3.Row
