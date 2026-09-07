@@ -45,7 +45,8 @@ class Banco:
         os.makedirs(DADOS_DIR, exist_ok=True)
         os.makedirs(FOTOS_DIR, exist_ok=True)
         self.multiusuario = multiusuario
-        self.conn = sqlite3.connect(DB_PATH, timeout=30)
+        self.conn = sqlite3.connect(DB_PATH, timeout=30,
+                                     check_same_thread=False)
         if multiusuario:
             self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.row_factory = sqlite3.Row
