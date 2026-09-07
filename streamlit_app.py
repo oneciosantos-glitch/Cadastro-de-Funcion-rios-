@@ -114,9 +114,6 @@ def pagina_cadastro(banco):
 
     combos = {t: banco.listar_combo(t) for t in ("loja", "situacao", "cargo")}
 
-    def indice(lista, valor):
-        return lista.index(valor) + 1 if valor in lista else 0
-
     # --- foto com visualizacao imediata (fora do formulario) ---
     st.subheader("\U0001F4F8 Foto")
     foto_atual = banco.caminho_foto(reg["foto"]) if reg else None
@@ -138,9 +135,60 @@ def pagina_cadastro(banco):
     else:
         cf1.info("\U0001F4F7 Sem foto")
 
+    # --- campos editaveis (fora do form para funcionar imediatamente) ---
+    st.markdown("#### \U0001F4DD Dados cadastrais")
+    c1, c2, c3, c4 = st.columns(4)
+
+    # Loja
+    opcoes_loja = combos["loja"] + ["\u270F\uFE0F Digitar nova loja..."]
+    val_loja = reg["loja"] if reg and reg.get("loja") else ""
+    if val_loja and val_loja not in combos["loja"]:
+        opcoes_loja = [val_loja] + combos["loja"] + ["\u270F\uFE0F Digitar nova loja..."]
+    idx_loja = opcoes_loja.index(val_loja) if val_loja in opcoes_loja else 0
+    sel_loja = c1.selectbox("\U0001F3EA Loja", opcoes_loja, index=idx_loja,
+                           key="sel_loja")
+    if sel_loja == "\u270F\uFE0F Digitar nova loja...":
+        loja = c1.text_input("Nome da Loja", value=val_loja, key="f_loja_nova",
+                             placeholder="Digite o nome da loja")
+    else:
+        loja = sel_loja
+    if loja.strip() and loja.strip() not in combos["loja"]:
+        banco.add_combo("loja", loja.strip())
+
+    # Situacao
+    opcoes_sit = combos["situacao"] + ["\u270F\uFE0F Digitar nova situacao..."]
+    val_sit = reg["situacao"] if reg and reg.get("situacao") else "Ativo"
+    if val_sit and val_sit not in combos["situacao"]:
+        opcoes_sit = [val_sit] + combos["situacao"] + ["\u270F\uFE0F Digitar nova situacao..."]
+    idx_sit = opcoes_sit.index(val_sit) if val_sit in opcoes_sit else 0
+    sel_sit = c2.selectbox("\U0001F4CB Situacao", opcoes_sit, index=idx_sit,
+                          key="sel_situacao")
+    if sel_sit == "\u270F\uFE0F Digitar nova situacao...":
+        situacao = c2.text_input("Nome da Situacao", value=val_sit, key="f_sit_nova",
+                                placeholder="Digite a situacao")
+    else:
+        situacao = sel_sit
+    if situacao.strip() and situacao.strip() not in combos["situacao"]:
+        banco.add_combo("situacao", situacao.strip())
+
+    # Cargo
+    opcoes_cargo = combos["cargo"] + ["\u270F\uFE0F Digitar novo cargo..."]
+    val_cargo = reg["cargo"] if reg and reg.get("cargo") else ""
+    if val_cargo and val_cargo not in combos["cargo"]:
+        opcoes_cargo = [val_cargo] + combos["cargo"] + ["\u270F\uFE0F Digitar novo cargo..."]
+    idx_cargo = opcoes_cargo.index(val_cargo) if val_cargo in opcoes_cargo else 0
+    sel_cargo = c3.selectbox("\U0001F4BC Cargo", opcoes_cargo, index=idx_cargo,
+                            key="sel_cargo")
+    if sel_cargo == "\u270F\uFE0F Digitar novo cargo...":
+        cargo = c3.text_input("Nome do Cargo", value=val_cargo, key="f_cargo_novo",
+                              placeholder="Digite o cargo")
+    else:
+        cargo = sel_cargo
+    if cargo.strip() and cargo.strip() not in combos["cargo"]:
+        banco.add_combo("cargo", cargo.strip())
+
     # --- formulario ---
     with st.form("cadastro", clear_on_submit=False):
-        st.markdown("#### \U0001F4DD Dados cadastrais")
         c1, c2, c3, c4 = st.columns(4)
         matricula = c1.text_input(
             "Matricula *", key="f_matricula",
@@ -158,36 +206,10 @@ def pagina_cadastro(banco):
             value=cal.parse_data(reg["admissao"]) if reg else date.today(),
             min_value=date(1970, 1, 1), max_value=date(2100, 12, 31))
 
-        opcoes_loja = [""] + combos["loja"] + ["Outra..."]
-        idx_loja = indice(combos["loja"], reg["loja"] if reg else None)
-        if idx_loja is None and reg and reg["loja"]:
-            idx_loja = len(opcoes_loja) - 1  # "Outra..."
-        sel_loja = c1.selectbox("\U0001F3EA Loja", opcoes_loja,
-                               index=idx_loja if idx_loja is not None else 0)
-        if sel_loja == "Outra...":
-            loja = c1.text_input("Nome da Loja", key="f_loja_nova",
-                                 value=reg["loja"] if reg and reg.get("loja") else "")
-            if loja.strip() and loja.strip() not in combos["loja"]:
-                banco.add_combo("loja", loja.strip())
-        else:
-            loja = sel_loja
-        situacao = c2.selectbox(
-            "\U0001F4CB Situacao", [""] + combos["situacao"],
-            index=indice(combos["situacao"],
-                         reg["situacao"] if reg else "Ativo"))
-        opcoes_cargo = [""] + combos["cargo"] + ["Outro..."]
-        idx_cargo = indice(combos["cargo"], reg["cargo"] if reg else None)
-        if idx_cargo is None and reg and reg["cargo"]:
-            idx_cargo = len(opcoes_cargo) - 1  # "Outro..."
-        sel_cargo = c3.selectbox("\U0001F4BC Cargo", opcoes_cargo,
-                                index=idx_cargo if idx_cargo is not None else 0)
-        if sel_cargo == "Outro...":
-            cargo = c3.text_input("Nome do Cargo", key="f_cargo_novo",
-                                  value=reg["cargo"] if reg and reg.get("cargo") else "")
-            if cargo.strip() and cargo.strip() not in combos["cargo"]:
-                banco.add_combo("cargo", cargo.strip())
-        else:
-            cargo = sel_cargo
+        # Loja, Situacao e Cargo ja definidos acima (fora do form)
+        c1.markdown(f"**Loja:** {loja or '-'}")
+        c2.markdown(f"**Situacao:** {situacao or '-'}")
+        c3.markdown(f"**Cargo:** {cargo or '-'}")
 
         prazos = ["Sem contrato"] + [f"{d} dias" for d in cal.PRAZOS_EXPERIENCIA]
         atual = (f"{reg['experiencia_dias']} dias"
