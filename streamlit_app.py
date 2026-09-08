@@ -12,12 +12,18 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+import importlib
+
 import calculos as cal
 from calculos import TIPOS_DESLIGAMENTO
 import dashboard as dash
 import exportador
 import estilo
 from database import Banco, DB_PATH
+
+# --- Safety: force reload modules to avoid stale bytecode on Streamlit Cloud ---
+for _mod in (cal, dash, exportador, estilo):
+    importlib.reload(_mod)
 
 st.set_page_config(page_title="Cadastro de Funcionarios",
                    page_icon="\U0001F465", layout="wide")
@@ -1380,8 +1386,15 @@ def pagina_dashboard(banco):
         return
 
     # --- KPI resumo ---
-    tot = dash.turnover_periodo(registros, meses, hoje)
-    ev = dash.resumo_eventos(registros, hoje)
+    _turnover_fn = getattr(dash, "turnover_periodo", None)
+    _resumo_fn = getattr(dash, "resumo_eventos", None)
+    if not _turnover_fn or not _resumo_fn:
+        st.error(
+            "Erro interno: modulo dashboard incompleto. "
+            "Reinicie a aplicacao ou faca redeploy.")
+        return
+    tot = _turnover_fn(registros, meses, hoje)
+    ev = _resumo_fn(registros, hoje)
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Quadro ativo", tot["quadro_atual"])
     k2.metric("Turnover", f"{tot['turnover_medio']}%")
