@@ -942,12 +942,12 @@ def pagina_eventos(banco):
 
     # Cartao de calculo de ferias
     f = cal.calcular_ferias(adm, hoje)
-    if f["vencida"]:
-        sit_tipo_fer = "perigo"
-    elif f["liberada"] and f["proxima_vencer_gozo"]:
+    if f["liberada"] and f["proxima_vencer_gozo"]:
         sit_tipo_fer = "alerta"
     elif f["liberada"]:
         sit_tipo_fer = "ok"
+    elif f["alerta_4_meses"]:
+        sit_tipo_fer = "alerta"
     elif f["situacao"] == "Proxima de liberar":
         sit_tipo_fer = "alerta"
     else:
@@ -973,17 +973,8 @@ def pagina_eventos(banco):
         progresso_pct=min(f["meses_cumpridos"] / f["meses_liberacao"], 1.0),
     )
 
-    # Alertas de ferias
-    if f["vencida"]:
-        dias_vencida = (hoje - f["inicio_periodo"]).days
-        prazo_expirado = cal.fmt(f["inicio_periodo"])
-        estilo.alerta_ferias_vencida(
-            f"{reg['matricula']} \u00B7 {reg['nome']}",
-            [("Liberada em", cal.fmt(f["data_liberacao"])),
-             ("Prazo de gozo expirou em", prazo_expirado),
-             ("Dias em atraso", f"{dias_vencida} dia(s)"),
-             ("Dias proporcionais", f"{f['dias_proporcionais']}")])
-    elif f["alerta_4_meses"]:
+    # Alertas de ferias (sem vencidas)
+    if f["alerta_4_meses"]:
         dias_lib = (f["data_liberacao"] - hoje).days
         estilo.alerta_ferias_4_meses(
             f"{reg['matricula']} \u00B7 {reg['nome']}",
@@ -1300,13 +1291,12 @@ def pagina_dashboard(banco):
     # --- KPI resumo ---
     tot = dash.turnover_periodo(registros, meses, hoje)
     ev = dash.resumo_eventos(registros, hoje)
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Quadro ativo", tot["quadro_atual"])
     k2.metric("Turnover", f"{tot['turnover_medio']}%")
     k3.metric("Admissoes", tot["admissoes"])
     k4.metric("Desligamentos", tot["desligamentos"])
-    k5.metric("\U0001F6A8 Ferias VENCIDAS", ev.get("ferias_vencidas", 0))
-    k6.metric("\U0001F7E1 Alerta 4 meses", ev.get("ferias_alerta_4m", 0))
+    k5.metric("\U0001F7E1 Alerta 4 meses", ev.get("ferias_alerta_4m", 0))
 
     st.divider()
 
@@ -1376,10 +1366,7 @@ def pagina_dashboard(banco):
 
     st.divider()
 
-    # --- Alertas visuais de ferias (vencida, gozo proximo, 4 meses) ---
-    vencidas = [r for r in dash.ativos(registros, hoje)
-                if cal.calcular_ferias(
-                    cal.parse_data(r["admissao"]), hoje)["vencida"]]
+    # --- Alertas visuais de ferias (so gozo proximo e 4 meses, SEM vencidas) ---
     gozo_30 = [r for r in dash.ativos(registros, hoje)
                if cal.calcular_ferias(
                    cal.parse_data(r["admissao"]), hoje)["proxima_vencer_gozo"]]
@@ -1387,17 +1374,6 @@ def pagina_dashboard(banco):
                 if cal.calcular_ferias(
                     cal.parse_data(r["admissao"]), hoje)["alerta_4_meses"]]
 
-    if vencidas:
-        for r in vencidas:
-            f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
-            dias_vencida = (hoje - f["inicio_periodo"]).days
-            estilo.alerta_ferias_vencida(
-                f"{r['matricula']} \u00B7 {r['nome']} \u00B7 "
-                f"{r.get('cargo', '') or '-'} \u00B7 {r.get('loja', '') or '-'}",
-                [("Liberada em", cal.fmt(f["data_liberacao"])),
-                 ("Prazo de gozo expirou em", cal.fmt(f["inicio_periodo"])),
-                 ("Dias em atraso", f"{dias_vencida} dia(s)"),
-                 ("Dias proporcionais", f"{f['dias_proporcionais']}")])
     if gozo_30:
         for r in gozo_30:
             f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
@@ -1421,9 +1397,8 @@ def pagina_dashboard(banco):
                  ("Regra", f["regra"]),
                  ("Dias proporcionais", f"{f['dias_proporcionais']}")])
 
-    if not vencidas and not gozo_30 and not alerta_4m:
-        st.success("\u2705 Nenhuma ferias vencida, com prazo de gozo "
-                   "vencendo em 30 dias ou com alerta de 4 meses.")
+    if not gozo_30 and not alerta_4m:
+        st.success("\u2705 Nenhuma ferias com alerta de 4 meses ou prazo de gozo vencendo.")
 
     # --- Graficos de turnover (colapsaveis) ---
     with st.expander("\U0001F4CA Turnover e movimentacao", expanded=False):
