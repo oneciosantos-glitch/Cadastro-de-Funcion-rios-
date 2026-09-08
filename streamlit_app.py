@@ -23,7 +23,198 @@ from database import Banco, DB_PATH
 
 # --- Safety: force reload modules to avoid stale bytecode on Streamlit Cloud ---
 for _mod in (cal, dash, exportador, estilo):
-    importlib.reload(_mod)
+    try:
+        importlib.reload(_mod)
+    except Exception:
+        pass
+
+# --- Fallback: ensure all dashboard functions are available ---
+# If the deployed dashboard.py is outdated and missing functions,
+# we define them here so the app keeps working.
+
+
+def _fb_turnover_periodo(registros, meses, ref=None):
+    ref = ref or date.today()
+    inicio = cal.add_meses(ref, -meses)
+    admissoes = desligamentos = 0
+    for r in registros:
+        a = cal.parse_data(r["admissao"])
+        d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
+        if a and inicio <= a <= ref:
+            admissoes += 1
+        if d and inicio <= d <= ref:
+            desligamentos += 1
+    ativos = _fb_ativos_em_data(registros, ref)
+    quadro_atual = len(ativos)
+    quadro_medio = max(quadro_atual + (admissoes + desligamentos) // 2, 1)
+    turno = ((admissoes + desligamentos) / 2) / quadro_medio * 100
+    return {"quadro_atual": quadro_atual, "admissoes": admissoes,
+            "desligamentos": desligamentos, "turnover_medio": round(turno, 1),
+            "quadro_medio": quadro_medio}
+
+
+def _fb_ativos_em_data(registros, ref):
+    resultado = []
+    for r in registros:
+        a = cal.parse_data(r["admissao"])
+        if a and a <= ref:
+            d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
+            if d is None or d > ref:
+                resultado.append(r)
+    return resultado
+
+
+def _fb_ativos(registros, ref=None):
+    ref = ref or date.today()
+    return _fb_ativos_em_data(registros, ref)
+
+
+def _fb_resumo_eventos(registros, ref=None):
+    ref = ref or date.today()
+    exp_30 = exp_7 = ferias_lib = ferias_venc = 0
+    ferias_prox = ferias_gozo_30 = ferias_alerta_4m = 0
+    for r in registros:
+        if r.get("experiencia_dias"):
+            e = cal.contrato_experiencia(
+                cal.parse_data(r["admissao"]), r["experiencia_dias"], ref)
+            if e["dias_restantes"] <= 30:
+                exp_30 += 1
+            if e["alerta"]:
+                exp_7 += 1
+        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
+                                  r.get("ferias_ultimo_gozo"))
+        if f["liberada"]:
+            ferias_lib += 1
+        if f["vencida"]:
+            ferias_venc += 1
+        if f["proxima_vencer_gozo"]:
+            ferias_gozo_30 += 1
+        if f["alerta_4_meses"]:
+            ferias_alerta_4m += 1
+        if not f["liberada"]:
+            dias_lib = (f["data_liberacao"] - ref).days
+            if 0 < dias_lib <= 60:
+                ferias_prox += 1
+    return {"experiencia_30": exp_30, "experiencia_7": exp_7,
+            "ferias_liberadas": ferias_lib, "ferias_proximas": ferias_prox,
+            "ferias_vencidas": ferias_venc, "ferias_gozo_30": ferias_gozo_30,
+            "ferias_alerta_4m": ferias_alerta_4m}
+
+
+def _fb_eventos_experiencia(registros, ref=None):
+    ref = ref or date.today()
+    rows = []
+    for r in registros:
+        if not r.get("experiencia_dias"):
+            continue
+        if r["situacao"] in TIPOS_DESLIGAMENTO:
+            continue
+        adm = cal.parse_data(r["admissao"])
+        e = cal.contrato_experiencia(adm, r["experiencia_dias"], ref)
+        _fim_clt = lambda dias: adm + timedelta(days=dias - 1)
+        _etapas = {30: "30", 45: "45", 60: "30 + 30", 90: "45 + 45"}
+        for p in [30, 45, 60, 90]:
+            p_fim = _fim_clt(p)
+            p_dias_rest = max((p_fim - ref).days, 0)
+            p_encerrado = ref > p_fim
+            p_alerta = p_dias_rest <= 7 and not p_encerrado
+            if p_encerrado:
+                p_sit = "Encerrado"
+            elif p_alerta:
+                p_sit = f"Atencao - vence em {p_dias_rest} dia(s)"
+            else:
+                p_sit = f"Dentro do prazo ({p_dias_rest} dias restantes)"
+            rows.append({"Matricula": r["matricula"],
+                         "Funcionario": r["nome"],
+                         "Loja": r.get("loja", ""),
+                         "Cargo": r.get("cargo", ""),
+                         "Prazo": f"{p}d ({_etapas.get(p, str(p))})",
+                         "Fim": cal.fmt(p_fim),
+                         "Dias restantes": p_dias_rest,
+                         "Situacao": p_sit})
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _fb_eventos_ferias(registros, ref=None):
+    ref = ref or date.today()
+    rows = []
+    for r in _fb_ativos(registros, ref):
+        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
+                                  r.get("ferias_ultimo_gozo"))
+        if f.get("ja_tirou_periodo"):
+            continue
+        if not (f["alerta_4_meses"] or f["liberada"]):
+            continue
+        if f["vencida"] and not f["liberada"]:
+            continue
+        alerta_4m_txt = "Sim" if f["alerta_4_meses"] else "Nao"
+        dias_lib = (f["data_liberacao"] - ref).days if f["data_liberacao"] > ref else 0
+        dias_gozo = (f["limite_gozo"] - ref).days
+        rows.append({"Matricula": r["matricula"],
+                     "Funcionario": r["nome"],
+                     "Loja": r.get("loja", ""),
+                     "Cargo": r.get("cargo", ""),
+                     "Regra": f["regra"],
+                     "Periodo": f"{cal.fmt(f['inicio_periodo'])} a {cal.fmt(f['fim_periodo'])}",
+                     "Liberacao": cal.fmt(f["data_liberacao"]),
+                     "Limite gozo": cal.fmt(f["limite_gozo"]),
+                     "Progresso": f["progresso"],
+                     "Dias prop.": f["dias_proporcionais"],
+                     "Alerta 4 meses": alerta_4m_txt,
+                     "Situacao": f["situacao"]})
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _fb_movimentacao_mensal(registros, meses, ref=None):
+    ref = ref or date.today()
+    rows = []
+    for i in range(meses - 1, -1, -1):
+        m = cal.add_meses(ref, -i)
+        mes_str = m.strftime("%Y-%m")
+        mes_label = m.strftime("%b/%y")
+        adm = desl = 0
+        for r in registros:
+            a = cal.parse_data(r["admissao"])
+            d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
+            if a and a.strftime("%Y-%m") == mes_str:
+                adm += 1
+            if d and d.strftime("%Y-%m") == mes_str:
+                desl += 1
+        quadro_fim = len(_fb_ativos_em_data(registros, m))
+        quadro_med = max(quadro_fim + (adm + desl) // 2, 1)
+        turno = ((adm + desl) / 2) / quadro_med * 100
+        rows.append({"Mes": mes_label, "Admissoes": adm,
+                     "Desligamentos": desl, "Quadro no fim do mes": quadro_fim,
+                     "Turnover %": round(turno, 1),
+                     "Desligamentos %": round(desl / quadro_med * 100, 1)})
+    return pd.DataFrame(rows).set_index("Mes")
+
+
+def _fb_turnover_por_loja(registros, meses, ref=None):
+    ref = ref or date.today()
+    lojas = sorted(set(r.get("loja", "") or "Sem loja" for r in registros))
+    rows = []
+    for loja in lojas:
+        regs = [r for r in registros if (r.get("loja", "") or "Sem loja") == loja]
+        t = _fb_turnover_periodo(regs, meses, ref)
+        rows.append({"Loja": loja, "Quadro": t["quadro_atual"],
+                     "Admissoes": t["admissoes"],
+                     "Desligamentos": t["desligamentos"],
+                     "Turnover %": t["turnover_medio"]})
+    if not rows:
+        return pd.DataFrame(columns=["Loja", "Quadro", "Admissoes",
+                                     "Desligamentos", "Turnover %"]).set_index("Loja")
+    return pd.DataFrame(rows).set_index("Loja")
+
+
+# Bind: use dashboard module functions if available, otherwise fallbacks
+d_turnover_periodo = getattr(dash, "turnover_periodo", _fb_turnover_periodo)
+d_resumo_eventos = getattr(dash, "resumo_eventos", _fb_resumo_eventos)
+d_ativos = getattr(dash, "ativos", _fb_ativos)
+d_eventos_experiencia = getattr(dash, "eventos_experiencia", _fb_eventos_experiencia)
+d_eventos_ferias = getattr(dash, "eventos_ferias", _fb_eventos_ferias)
+d_movimentacao_mensal = getattr(dash, "movimentacao_mensal", _fb_movimentacao_mensal)
+d_turnover_por_loja = getattr(dash, "turnover_por_loja", _fb_turnover_por_loja)
 
 st.set_page_config(page_title="Cadastro de Funcionarios",
                    page_icon="\U0001F465", layout="wide")
@@ -1386,15 +1577,8 @@ def pagina_dashboard(banco):
         return
 
     # --- KPI resumo ---
-    _turnover_fn = getattr(dash, "turnover_periodo", None)
-    _resumo_fn = getattr(dash, "resumo_eventos", None)
-    if not _turnover_fn or not _resumo_fn:
-        st.error(
-            "Erro interno: modulo dashboard incompleto. "
-            "Reinicie a aplicacao ou faca redeploy.")
-        return
-    tot = _turnover_fn(registros, meses, hoje)
-    ev = _resumo_fn(registros, hoje)
+    tot = d_turnover_periodo(registros, meses, hoje)
+    ev = d_resumo_eventos(registros, hoje)
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Quadro ativo", tot["quadro_atual"])
     k2.metric("Turnover", f"{tot['turnover_medio']}%")
@@ -1411,7 +1595,7 @@ def pagina_dashboard(banco):
 
     # ========== TAB EXPERIENCIA ==========
     with tab_exp:
-        exp = dash.eventos_experiencia(registros, hoje)
+        exp = d_eventos_experiencia(registros, hoje)
         if exp.empty:
             st.success("\u2705 Nenhum funcionario com contrato de experiencia registrado.")
         else:
@@ -1444,7 +1628,7 @@ def pagina_dashboard(banco):
 
     # ========== TAB FERIAS ==========
     with tab_fer:
-        fer = dash.eventos_ferias(registros, hoje)
+        fer = d_eventos_ferias(registros, hoje)
         if fer.empty:
             st.info("Sem funcionarios ativos com alerta de ferias.")
         else:
@@ -1471,11 +1655,11 @@ def pagina_dashboard(banco):
     st.divider()
 
     # --- Alertas visuais de ferias (so gozo proximo e 4 meses, SEM vencidas) ---
-    gozo_30 = [r for r in dash.ativos(registros, hoje)
+    gozo_30 = [r for r in d_ativos(registros, hoje)
                if cal.calcular_ferias(
                    cal.parse_data(r["admissao"]), hoje,
                    r.get("ferias_ultimo_gozo"))["proxima_vencer_gozo"]]
-    alerta_4m = [r for r in dash.ativos(registros, hoje)
+    alerta_4m = [r for r in d_ativos(registros, hoje)
                 if cal.calcular_ferias(
                     cal.parse_data(r["admissao"]), hoje,
                     r.get("ferias_ultimo_gozo"))["alerta_4_meses"]]
@@ -1511,7 +1695,7 @@ def pagina_dashboard(banco):
     # --- Graficos de turnover (colapsaveis) ---
     with st.expander("\U0001F4CA Turnover e movimentacao", expanded=False):
         col = estilo.CORES_GRAFICO
-        mov = dash.movimentacao_mensal(registros, meses, hoje)
+        mov = d_movimentacao_mensal(registros, meses, hoje)
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("##### Turnover mensal (%)")
@@ -1526,7 +1710,7 @@ def pagina_dashboard(banco):
         st.area_chart(mov[["Quadro no fim do mes"]],
                       color=col[2], height=220)
 
-        por_loja = dash.turnover_por_loja(registros, meses, hoje)
+        por_loja = d_turnover_por_loja(registros, meses, hoje)
         c1, c2 = st.columns([2, 3])
         c1.bar_chart(por_loja[["Turnover %"]], color=col[3], height=240)
         c2.dataframe(por_loja.style.format({"Turnover %": "{:.1f}%"}),
