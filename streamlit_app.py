@@ -75,6 +75,81 @@ def _filtros(banco, chave):
 
 
 # ============================================================
+# ENCERRAMENTO AUTOMATICO DE EVENTOS VENCIDOS
+# ============================================================
+
+def _encerrar_eventos_vencidos(banco):
+    """Verifica eventos com data de retorno vencida e encerra automaticamente.
+
+    Para cada tipo de evento (ferias, licenca maternidade, afastamento INSS),
+    busca registros com situacao ativa cuja data_retorno ja passou,
+    limpa os campos do evento e reverte situacao para 'Ativo'.
+
+    Returns:
+        int: numero total de eventos encerrados automaticamente.
+    """
+    hoje = date.today().isoformat()
+    total = 0
+
+    # --- Férias ---
+    cur = banco.conn.execute(
+        "SELECT id, nome FROM funcionarios "
+        "WHERE situacao = 'Está de Férias' "
+        "AND ferias_retorno IS NOT NULL "
+        "AND ferias_retorno < ?",
+        (hoje,)
+    )
+    rows = cur.fetchall()
+    for row in rows:
+        banco.atualizar(row["id"], {
+            "ferias_inicio": None,
+            "ferias_dias": None,
+            "ferias_retorno": None,
+            "situacao": "Ativo",
+        })
+    total += len(rows)
+
+    # --- Licença Maternidade ---
+    cur = banco.conn.execute(
+        "SELECT id, nome FROM funcionarios "
+        "WHERE situacao = 'Licença Maternidade' "
+        "AND licenca_maternidade_retorno IS NOT NULL "
+        "AND licenca_maternidade_retorno < ?",
+        (hoje,)
+    )
+    rows = cur.fetchall()
+    for row in rows:
+        banco.atualizar(row["id"], {
+            "licenca_maternidade_inicio": None,
+            "licenca_maternidade_dias": None,
+            "licenca_maternidade_retorno": None,
+            "situacao": "Ativo",
+        })
+    total += len(rows)
+
+    # --- Afastamento INSS ---
+    cur = banco.conn.execute(
+        "SELECT id, nome FROM funcionarios "
+        "WHERE situacao = 'Afastado INSS' "
+        "AND afastamento_retorno IS NOT NULL "
+        "AND afastamento_retorno < ?",
+        (hoje,)
+    )
+    rows = cur.fetchall()
+    for row in rows:
+        banco.atualizar(row["id"], {
+            "afastamento_tipo": None,
+            "afastamento_inicio": None,
+            "afastamento_dias": None,
+            "afastamento_retorno": None,
+            "situacao": "Ativo",
+        })
+    total += len(rows)
+
+    return total
+
+
+# ============================================================
 # PAGINAS
 # ============================================================
 
@@ -1431,6 +1506,15 @@ def pagina_dashboard(banco):
 
 def main():
     banco = get_banco()
+
+    # Encerrar automaticamente eventos com data de retorno vencida
+    _vencidos = _encerrar_eventos_vencidos(banco)
+    if _vencidos:
+        st.toast(
+            f"✅ {_vencidos} evento(s) encerrado(s) automaticamente "
+            f"(data de retorno vencida)",
+            icon="🔄")
+
     estilo.marca()
 
     # Se veio de outra pagina (ex: Editar cadastro), navegar automaticamente
