@@ -232,17 +232,21 @@ def eventos_experiencia(registros, ref=None):
 
 
 def eventos_ferias(registros, ref=None):
+    """Retorna DataFrame apenas com colaboradores em alerta de 4 meses
+    ou com ferias liberadas. NAO mostra ferias vencidas."""
     ref = ref or date.today()
     rows = []
     for r in ativos(registros, ref):
         f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref)
-        # Filtrar: mostrar apenas colaboradores com alerta_4_meses,
-        # ferias liberada ou vencida
-        if not (f["alerta_4_meses"] or f["liberada"] or f["vencida"]):
+        # Mostrar APENAS: alerta_4_meses ou liberada (sem vencida)
+        if not (f["alerta_4_meses"] or f["liberada"]):
             continue
-        vencida_txt = "Sim" if f["vencida"] else "Nao"
-        gozo_30_txt = "Sim" if f["proxima_vencer_gozo"] else "Nao"
+        # Se vencida, NAO mostrar mesmo que tenha alerta
+        if f["vencida"] and not f["liberada"]:
+            continue
         alerta_4m_txt = "Sim" if f["alerta_4_meses"] else "Nao"
+        dias_lib = (f["data_liberacao"] - ref).days if f["data_liberacao"] > ref else 0
+        dias_gozo = (f["limite_gozo"] - ref).days
         rows.append({
             "Matricula": r["matricula"],
             "Funcionario": r["nome"],
@@ -254,9 +258,6 @@ def eventos_ferias(registros, ref=None):
             "Limite gozo": cal.fmt(f["limite_gozo"]),
             "Progresso": f["progresso"],
             "Dias prop.": f["dias_proporcionais"],
-            "Liberada": "Sim" if f["liberada"] else "Nao",
-            "Vencida": vencida_txt,
-            "Gozo vence 30d": gozo_30_txt,
             "Alerta 4 meses": alerta_4m_txt,
             "Situacao": f["situacao"],
         })
