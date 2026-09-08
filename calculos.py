@@ -191,38 +191,54 @@ def calcular_ferias(admissao, ref=None):
                       and (data_liberacao - ref).days <= 120)
 
     # --- Verificar periodo anterior (ferias vencidas) ---
+    # Vencida = o prazo de gozo do periodo anterior expirou
+    # (ref > fim_periodo e o periodo ainda nao foi liberado/gozado)
     vencida = False
     periodo_vencido_fim = None
 
+    # Para >= 24 meses: se ref > fim_periodo do ciclo anterior,
+    # as ferias do ciclo anterior venceram sem gozo.
+    # Detectamos verificando se o inicio do periodo atual e posterior
+    # ao aniversario anterior, ou seja, estamos em inicio < ref < lib
+    # e o limite de gozo do periodo anterior (= inicio atual) ja passou.
+    # Simplificacao: se inicio_periodo < ref E ref > limite do gozo anterior
+    # O gozo anterior = inicio_periodo (fim do periodo anterior = inicio do atual).
     if meses_casa >= 24:
-        if inicio_periodo < ref < data_liberacao:
+        # O inicio do periodo atual = fim do periodo anterior = limite de gozo anterior.
+        # Se ref > inicio_periodo e ainda nao foi liberada (ref < data_liberacao),
+        # entao o prazo de gozo do periodo ANTERIOR expirou.
+        if inicio_periodo < ref and ref < data_liberacao:
             vencida = True
             periodo_vencido_fim = inicio_periodo
 
+    # Para < 24 meses: ferias vencem se ref ultrapassa o fim do periodo de 24 meses.
     if meses_casa < 24 and ref > fim_periodo:
         vencida = True
         periodo_vencido_fim = fim_periodo
+
+    # --- Situacao (sem usar vencida no texto visivel ao usuario) ---
+    # O usuario NAO quer ver "VENCIDA" no dashboard.
+    # No dashboard so aparecem: alerta_4_meses e liberadas.
+    # Vencida e tratada internamente para controle.
+    if alerta_4_meses and not liberada:
+        dias_lib = (data_liberacao - ref).days
+        situacao = f"Alerta - liberacao em {dias_lib} dia(s)"
+    elif liberada and not vencida:
+        dias_restantes_gozo = (limite_gozo - ref).days
+        situacao = f"Liberada - {dias_restantes_gozo}d para gozo"
+    elif liberada and vencida:
+        situacao = "Liberada (periodo anterior pendente)"
+    elif vencida and not liberada:
+        situacao = "Periodo anterior vencido"
+    elif meses_cumpridos >= meses_liberacao - 2:
+        situacao = "Proxima de liberar"
+    else:
+        situacao = "Em curso"
 
     proxima_vencer = (liberada and not vencida
                      and (limite_gozo - ref).days <= 30)
     progresso = f"{meses_cumpridos}/{meses_liberacao}"
     dias_proporcionais = round(meses_cumpridos * 2.5, 1)
-
-    if vencida and periodo_vencido_fim:
-        dias_vencida = (ref - periodo_vencido_fim).days
-        situacao = f"VENCIDA ha {dias_vencida} dia(s)"
-    elif alerta_4_meses and not liberada:
-        dias_lib = (data_liberacao - ref).days
-        situacao = f"ALERTA - liberacao em {dias_lib}d"
-    elif liberada and proxima_vencer:
-        dias_restantes_gozo = (limite_gozo - ref).days
-        situacao = f"LIBERADA - gozo vence em {dias_restantes_gozo}d"
-    elif liberada:
-        situacao = "LIBERADA"
-    elif meses_cumpridos >= meses_liberacao - 2:
-        situacao = "Proxima de liberar"
-    else:
-        situacao = "Em curso"
 
     return {
         "regra": regra,
