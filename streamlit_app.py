@@ -24,7 +24,7 @@ st.set_page_config(page_title="Cadastro de Funcionarios",
 estilo.aplicar()
 
 
-@st.cache_resource
+@st.cache_resource(ttl=300)
 def get_banco():
     return Banco(multiusuario=True)
 
@@ -88,6 +88,14 @@ def _encerrar_eventos_vencidos(banco):
     Returns:
         int: numero total de eventos encerrados automaticamente.
     """
+    # Garantir que a coluna ferias_ultimo_gozo existe (migracao)
+    cols = [r[1] for r in banco.conn.execute(
+        "PRAGMA table_info(funcionarios)").fetchall()]
+    if "ferias_ultimo_gozo" not in cols:
+        banco.conn.execute(
+            "ALTER TABLE funcionarios ADD COLUMN ferias_ultimo_gozo TEXT DEFAULT NULL")
+        banco.conn.commit()
+
     hoje = date.today().isoformat()
     total = 0
 
