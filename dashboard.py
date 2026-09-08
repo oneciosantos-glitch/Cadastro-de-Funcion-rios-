@@ -162,7 +162,8 @@ def resumo_eventos(registros, ref=None):
                 exp_30 += 1
             if e["alerta"]:
                 exp_7 += 1
-        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref)
+        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
+                                  r.get("ferias_ultimo_gozo"))
         if f["liberada"]:
             ferias_lib += 1
         if f["vencida"]:
@@ -237,8 +238,12 @@ def eventos_ferias(registros, ref=None):
     ref = ref or date.today()
     rows = []
     for r in ativos(registros, ref):
-        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref)
+        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
+                                  r.get("ferias_ultimo_gozo"))
         # Mostrar APENAS: alerta_4_meses ou liberada (sem vencida)
+        # Se ja tirou este periodo, NAO mostrar
+        if f.get("ja_tirou_periodo"):
+            continue
         if not (f["alerta_4_meses"] or f["liberada"]):
             continue
         # Se vencida, NAO mostrar mesmo que tenha alerta
