@@ -575,34 +575,14 @@ def estilo_tabela_saas(df, tipo="experiencia"):
 
     tipo = 'experiencia' | 'ferias'
     Retorna Styler pronto para st.dataframe().
+    Compativel com pandas 1.x e 2.x+.
     """
     if df.empty:
         return df.style
 
-    # --- colunas de status p/ cor ---
-    col_status = "Situacao"  # existe em ambos os DataFrames
+    col_status = "Situacao"
 
-    # Cores de fundo por status
-    _mapa_cor = {
-        # Experiencia
-        "encerrado": "#F5F5F5",           # cinza claro
-        "atencao": "#FFF3E0",             # laranja claro
-        "dentro do prazo": "#FFFFFF",     # branco
-        # Ferias
-        "vencida": "#FFEBEE",             # vermelho claro
-        "liberada": "#E8F5E9",            # verde claro
-        "alerta": "#FFF8E1",              # amarelo claro
-        "em curso": "#FFFFFF",             # branco
-        "proxima": "#FFF8E1",             # amarelo claro
-    }
-
-    def _cor_status(val):
-        v = str(val).lower()
-        for chave, cor in _mapa_cor.items():
-            if chave in v:
-                return f"background-color: {cor}"
-        return ""
-
+    # --- cores de fundo por status ---
     def _cor_linha(linha):
         sit = str(linha.get(col_status, "")).lower()
         if "vencida" in sit:
@@ -617,61 +597,56 @@ def estilo_tabela_saas(df, tipo="experiencia"):
             bg = "#FFFFFF"
         return [f"background-color: {bg}"] * len(linha)
 
-    # Cor do texto da situacao
+    # --- cor do texto da situacao ---
     def _txt_status(val):
         v = str(val).lower()
         if "vencida" in v:
-            return "color: #C62828; font-weight: 700"
+            return "color: #C62828; font-weight: bold"
         if "atencao" in v or "alerta" in v:
-            return "color: #E65100; font-weight: 700"
+            return "color: #E65100; font-weight: bold"
         if "liberada" in v:
-            return "color: #2E7D32; font-weight: 600"
+            return "color: #2E7D32; font-weight: bold"
         if "encerrado" in v:
-            return "color: #757575; font-weight: 500"
+            return "color: #757575"
         if "dentro do prazo" in v:
-            return "color: #1565C0; font-weight: 500"
-        if "em curso" in v:
-            return "color: #546E7A; font-weight: 500"
+            return "color: #1565C0"
         return ""
 
-    # Compatibilidade pandas 1.x (.applymap) e 2.x+ (.map)
-    _use_applymap = not hasattr(df.style, 'map')
-
+    # --- monta Styler com maxima compatibilidade ---
     styler = df.style.apply(_cor_linha, axis=1)
 
+    # Element-wise: .map() (pandas >= 2.0) ou .applymap() (pandas < 2.0)
     if col_status in df.columns:
-        if _use_applymap:
-            styler = styler.applymap(_txt_status, subset=[col_status])
-        else:
-            styler = styler.map(_txt_status, subset=[col_status])
+        _elem_fn = getattr(styler, "map", None) or getattr(styler, "applymap")
+        if _elem_fn is not None:
+            styler = _elem_fn(_txt_status, subset=[col_status])
 
     styler = styler.set_properties(**{
-            "border": "none",
-            "border-bottom": "1px solid #E0E0E0",
-            "padding": "8px 12px",
-            "font-size": "13px",
-            "font-family": "'Inter', 'Segoe UI', system-ui, sans-serif",
-        })\
-        .set_table_styles([
-            {"selector": "th", "props": [
-                ("background-color", "#F5F5F5"),
-                ("color", "#424242"),
-                ("font-weight", "600"),
-                ("font-size", "12px"),
-                ("text-transform", "uppercase"),
-                ("letter-spacing", "0.5px"),
-                ("border-bottom", "2px solid #E0E0E0"),
-                ("padding", "10px 12px"),
-            ]},
-            {"selector": "td", "props": [
-                ("border", "none"),
-                ("border-bottom", "1px solid #ECECEC"),
-                ("padding", "8px 12px"),
-            ]},
-            {"selector": "", "props": [
-                ("border-collapse", "collapse"),
-                ("width", "100%"),
-            ]},
-        ])
+        "border": "none",
+        "border-bottom": "1px solid #E0E0E0",
+        "padding": "8px 12px",
+        "font-size": "13px",
+        "font-family": "'Inter', 'Segoe UI', system-ui, sans-serif",
+    }).set_table_styles([
+        {"selector": "th", "props": [
+            ("background-color", "#F5F5F5"),
+            ("color", "#424242"),
+            ("font-weight", "600"),
+            ("font-size", "12px"),
+            ("text-transform", "uppercase"),
+            ("letter-spacing", "0.5px"),
+            ("border-bottom", "2px solid #E0E0E0"),
+            ("padding", "10px 12px"),
+        ]},
+        {"selector": "td", "props": [
+            ("border", "none"),
+            ("border-bottom", "1px solid #ECECEC"),
+            ("padding", "8px 12px"),
+        ]},
+        {"selector": "", "props": [
+            ("border-collapse", "collapse"),
+            ("width", "100%"),
+        ]},
+    ])
 
     return styler
