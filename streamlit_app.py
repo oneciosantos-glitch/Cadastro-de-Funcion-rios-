@@ -1280,10 +1280,10 @@ def pagina_config(banco):
 
 
 def pagina_dashboard(banco):
-    estilo.cabecalho("Dashboard", "Turnover e eventos trabalhistas")
+    estilo.cabecalho("Dashboard", "Controle de contratos e eventos trabalhistas")
     registros = banco.pesquisar()
     if not registros:
-        st.info("Cadastre funcionarios para ver os graficos.")
+        st.info("Cadastre funcionarios para ver o painel.")
         return
 
     hoje = date.today()
@@ -1297,91 +1297,111 @@ def pagina_dashboard(banco):
         st.info("Nenhum funcionario nas lojas selecionadas.")
         return
 
+    # --- KPI resumo ---
     tot = dash.turnover_periodo(registros, meses, hoje)
     ev = dash.resumo_eventos(registros, hoje)
-    k1, k2, k3, k4, k5, k6, k7, k8 = st.columns(8)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Quadro ativo", tot["quadro_atual"])
-    k2.metric("Turnover medio", f"{tot['turnover_medio']}%",
-              help="((admissoes + desligamentos) / 2) / quadro medio")
+    k2.metric("Turnover", f"{tot['turnover_medio']}%")
     k3.metric("Admissoes", tot["admissoes"])
     k4.metric("Desligamentos", tot["desligamentos"])
-    k5.metric("Ferias liberadas", ev.get("ferias_liberadas", 0))
-    k6.metric("\U0001F6A8 Ferias VENCIDAS", ev.get("ferias_vencidas", 0))
-    k7.metric("\u26A0\uFE0F Gozo vence 30d", ev.get("ferias_gozo_30", 0))
-    k8.metric("\U0001F7E1 Alerta 4 meses", ev.get("ferias_alerta_4m", 0))
+    k5.metric("\U0001F6A8 Ferias VENCIDAS", ev.get("ferias_vencidas", 0))
+    k6.metric("\U0001F7E1 Alerta 4 meses", ev.get("ferias_alerta_4m", 0))
 
     st.divider()
 
-    col = estilo.CORES_GRAFICO
-    mov = dash.movimentacao_mensal(registros, meses, hoje)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### \U0001F4C8 Turnover mensal (%)")
-        st.line_chart(mov[["Turnover %", "Desligamentos %"]],
-                      color=[col[0], col[3]], height=290)
-    with c2:
-        st.markdown("#### \U0001F4CA Admissoes x desligamentos")
-        st.bar_chart(mov[["Admissoes", "Desligamentos"]],
-                     color=[col[1], col[3]], height=290)
+    # --- Abas principais: Experiencia e Ferias ---
+    tab_exp, tab_fer = st.tabs(
+        ["\U0001F4DD Contratos de experiencia",
+         "\U0001F3D6\uFE0F Ferias"])
 
-    st.markdown("#### \U0001F4C9 Evolucao do quadro")
-    st.area_chart(mov[["Quadro no fim do mes"]],
-                  color=col[2], height=250)
+    # ========== TAB EXPERIENCIA ==========
+    with tab_exp:
+        exp = dash.eventos_experiencia(registros, hoje)
+        if exp.empty:
+            st.success("\u2705 Nenhum funcionario com contrato de experiencia registrado.")
+        else:
+            # Filtros rapidos
+            f1, f2, f3 = st.columns(3)
+            filtro_loja_exp = f1.selectbox(
+                "Filtrar por loja", ["Todas"] + sorted(exp["Loja"].unique().tolist()),
+                key="exp_filtro_loja")
+            filtro_sit = f2.selectbox(
+                "Filtrar por situacao",
+                ["Todas"] + sorted(exp["Situacao"].unique().tolist()),
+                key="exp_filtro_sit")
+            filtro_prazo = f3.selectbox(
+                "Filtrar por prazo",
+                ["Todos"] + sorted(exp["Prazo"].unique().tolist()),
+                key="exp_filtro_prazo")
+
+            df_exp = exp.copy()
+            if filtro_loja_exp != "Todas":
+                df_exp = df_exp[df_exp["Loja"] == filtro_loja_exp]
+            if filtro_sit != "Todas":
+                df_exp = df_exp[df_exp["Situacao"] == filtro_sit]
+            if filtro_prazo != "Todos":
+                df_exp = df_exp[df_exp["Prazo"] == filtro_prazo]
+
+            st.caption(f"{len(df_exp)} contrato(s) de experiencia")
+            st.dataframe(
+                estilo.estilo_tabela_saas(df_exp, tipo="experiencia"),
+                column_config={
+                    "Dias restantes": st.column_config.ProgressColumn(
+                        min_value=0, max_value=90, format="%d dias"),
+                },
+                width="stretch", hide_index=True)
+
+    # ========== TAB FERIAS ==========
+    with tab_fer:
+        fer = dash.eventos_ferias(registros, hoje)
+        if fer.empty:
+            st.info("Sem funcionarios ativos com alerta de ferias.")
+        else:
+            f1, f2 = st.columns(2)
+            filtro_loja_fer = f1.selectbox(
+                "Filtrar por loja", ["Todas"] + sorted(fer["Loja"].unique().tolist()),
+                key="fer_filtro_loja")
+            filtro_sit_fer = f2.selectbox(
+                "Filtrar por situacao",
+                ["Todas"] + sorted(fer["Situacao"].unique().tolist()),
+                key="fer_filtro_sit")
+
+            df_fer = fer.copy()
+            if filtro_loja_fer != "Todas":
+                df_fer = df_fer[df_fer["Loja"] == filtro_loja_fer]
+            if filtro_sit_fer != "Todas":
+                df_fer = df_fer[df_fer["Situacao"] == filtro_sit_fer]
+
+            st.caption(f"{len(df_fer)} funcionario(s) com alerta de ferias")
+            st.dataframe(
+                estilo.estilo_tabela_saas(df_fer, tipo="ferias"),
+                width="stretch", hide_index=True)
 
     st.divider()
-    st.markdown("#### \U0001F3E2 Turnover por loja")
-    por_loja = dash.turnover_por_loja(registros, meses, hoje)
-    c1, c2 = st.columns([2, 3])
-    c1.bar_chart(por_loja[["Turnover %"]], color=col[3], height=260)
-    c2.dataframe(por_loja.style.format({"Turnover %": "{:.1f}%"}),
-                 width="stretch")
 
-    c1, c2, c3 = st.columns(3)
-    ativos_lista = dash.ativos(registros, hoje)
-    with c1:
-        st.markdown("#### \U0001F4BC Por cargo")
-        st.bar_chart(dash.por_categoria(ativos_lista, "cargo", "Cargo"),
-                     color=col[0], height=260)
-    with c2:
-        st.markdown("#### \U0001F4CB Por situacao")
-        st.bar_chart(dash.por_categoria(registros, "situacao", "Situacao"),
-                     color=col[1], height=260)
-    with c3:
-        st.markdown("#### \u23F1 Tempo de casa")
-        st.bar_chart(dash.faixas_tempo_casa(registros, hoje),
-                     color=col[2], height=260)
-
-    st.divider()
-    st.markdown("#### \U0001F4C4 Eventos trabalhistas")
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("\U0001F4CB Experiencia vencendo em 30d",
-              ev.get("experiencia_30", 0))
-    k2.metric("\u26A0 Experiencia vencendo em 7d",
-              ev.get("experiencia_7", 0))
-    k3.metric("\U0001F3D6 Ferias liberando em 60d",
-              ev.get("ferias_proximas", 0))
-    k4.metric("\U0001F6A8 Ferias VENCIDAS",
-              ev.get("ferias_vencidas", 0))
-
-    # --- alerta visual urgente: ferias vencidas ---
+    # --- Alertas visuais de ferias (vencida, gozo proximo, 4 meses) ---
     vencidas = [r for r in dash.ativos(registros, hoje)
                 if cal.calcular_ferias(
                     cal.parse_data(r["admissao"]), hoje)["vencida"]]
+    gozo_30 = [r for r in dash.ativos(registros, hoje)
+               if cal.calcular_ferias(
+                   cal.parse_data(r["admissao"]), hoje)["proxima_vencer_gozo"]]
+    alerta_4m = [r for r in dash.ativos(registros, hoje)
+                if cal.calcular_ferias(
+                    cal.parse_data(r["admissao"]), hoje)["alerta_4_meses"]]
+
     if vencidas:
         for r in vencidas:
             f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
             dias_vencida = (hoje - f["inicio_periodo"]).days
-            prazo_expirado = cal.fmt(f["inicio_periodo"])
             estilo.alerta_ferias_vencida(
                 f"{r['matricula']} \u00B7 {r['nome']} \u00B7 "
                 f"{r.get('cargo', '') or '-'} \u00B7 {r.get('loja', '') or '-'}",
                 [("Liberada em", cal.fmt(f["data_liberacao"])),
-                 ("Prazo de gozo expirou em", prazo_expirado),
+                 ("Prazo de gozo expirou em", cal.fmt(f["inicio_periodo"])),
                  ("Dias em atraso", f"{dias_vencida} dia(s)"),
                  ("Dias proporcionais", f"{f['dias_proporcionais']}")])
-    gozo_30 = [r for r in dash.ativos(registros, hoje)
-               if cal.calcular_ferias(
-                   cal.parse_data(r["admissao"]), hoje)["proxima_vencer_gozo"]]
     if gozo_30:
         for r in gozo_30:
             f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
@@ -1393,11 +1413,6 @@ def pagina_dashboard(banco):
                  ("Prazo de gozo expira em", cal.fmt(f["limite_gozo"])),
                  ("Dias restantes", f"{dias_restantes} dia(s)"),
                  ("Dias proporcionais", f"{f['dias_proporcionais']}")])
-
-    # --- alerta visual: ferias com alerta de 4 meses ---
-    alerta_4m = [r for r in dash.ativos(registros, hoje)
-                if cal.calcular_ferias(
-                    cal.parse_data(r["admissao"]), hoje)["alerta_4_meses"]]
     if alerta_4m:
         for r in alerta_4m:
             f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
@@ -1414,26 +1429,29 @@ def pagina_dashboard(banco):
         st.success("\u2705 Nenhuma ferias vencida, com prazo de gozo "
                    "vencendo em 30 dias ou com alerta de 4 meses.")
 
-    tab1, tab2 = st.tabs(
-        ["\U0001F4DD Contratos de experiencia",
-         "\U0001F3D6 Ferias"])
-    with tab1:
-        exp = dash.eventos_experiencia(registros, hoje)
-        if exp.empty:
-            st.success("\u2705 Nenhum funcionario com contrato de experiencia registrado.")
-        else:
-            st.dataframe(estilo.estilo_tabela(exp,
-                         coluna_exp="Situacao"),
-                         width="stretch", hide_index=True)
-    with tab2:
-        fer = dash.eventos_ferias(registros, hoje)
-        if fer.empty:
-            st.info("Sem funcionarios ativos.")
-        else:
-            st.dataframe(
-                estilo.estilo_tabela(fer, coluna_ferias="Liberada",
-                                     coluna_vencida="Vencida"),
-                width="stretch", hide_index=True)
+    # --- Graficos de turnover (colapsaveis) ---
+    with st.expander("\U0001F4CA Turnover e movimentacao", expanded=False):
+        col = estilo.CORES_GRAFICO
+        mov = dash.movimentacao_mensal(registros, meses, hoje)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("##### Turnover mensal (%)")
+            st.line_chart(mov[["Turnover %", "Desligamentos %"]],
+                          color=[col[0], col[3]], height=250)
+        with c2:
+            st.markdown("##### Admissoes x desligamentos")
+            st.bar_chart(mov[["Admissoes", "Desligamentos"]],
+                         color=[col[1], col[3]], height=250)
+
+        st.markdown("##### Evolucao do quadro")
+        st.area_chart(mov[["Quadro no fim do mes"]],
+                      color=col[2], height=220)
+
+        por_loja = dash.turnover_por_loja(registros, meses, hoje)
+        c1, c2 = st.columns([2, 3])
+        c1.bar_chart(por_loja[["Turnover %"]], color=col[3], height=240)
+        c2.dataframe(por_loja.style.format({"Turnover %": "{:.1f}%"}),
+                     width="stretch")
 
 
 # ============================================================
