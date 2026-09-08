@@ -372,6 +372,31 @@ div.secao-todos-prazos h4 {
     border-radius: 10px;
     overflow: hidden;
 }
+
+/* ----- SaaS table overrides ----- */
+.stDataFrame table {
+    border-collapse: collapse !important;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+    font-size: 13px !important;
+}
+.stDataFrame thead th {
+    background: #F5F5F5 !important;
+    color: #424242 !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    border-bottom: 2px solid #E0E0E0 !important;
+    padding: 10px 12px !important;
+}
+.stDataFrame tbody td {
+    border: none !important;
+    border-bottom: 1px solid #ECECEC !important;
+    padding: 8px 12px !important;
+}
+.stDataFrame tbody tr:hover {
+    background-color: #F5F5F5 !important;
+}
 </style>"""
 
 
@@ -543,3 +568,102 @@ def estilo_tabela(df, coluna_ferias="Ferias", coluna_exp="Status experiencia",
         return [cor] * len(linha)
 
     return df.style.apply(pintar, axis=1)
+
+
+def estilo_tabela_saas(df, tipo="experiencia"):
+    """Estilo SaaS minimalista: zebra rows, cores de status, bordas finas.
+
+    tipo = 'experiencia' | 'ferias'
+    Retorna Styler pronto para st.dataframe().
+    """
+    if df.empty:
+        return df.style
+
+    # --- colunas de status p/ cor ---
+    col_status = "Situacao"  # existe em ambos os DataFrames
+
+    # Cores de fundo por status
+    _mapa_cor = {
+        # Experiencia
+        "encerrado": "#F5F5F5",           # cinza claro
+        "atencao": "#FFF3E0",             # laranja claro
+        "dentro do prazo": "#FFFFFF",     # branco
+        # Ferias
+        "vencida": "#FFEBEE",             # vermelho claro
+        "liberada": "#E8F5E9",            # verde claro
+        "alerta": "#FFF8E1",              # amarelo claro
+        "em curso": "#FFFFFF",             # branco
+        "proxima": "#FFF8E1",             # amarelo claro
+    }
+
+    def _cor_status(val):
+        v = str(val).lower()
+        for chave, cor in _mapa_cor.items():
+            if chave in v:
+                return f"background-color: {cor}"
+        return ""
+
+    def _cor_linha(linha):
+        sit = str(linha.get(col_status, "")).lower()
+        if "vencida" in sit:
+            bg = "#FFEBEE"
+        elif "atencao" in sit or "alerta" in sit:
+            bg = "#FFF3E0"
+        elif "liberada" in sit:
+            bg = "#E8F5E9"
+        elif "encerrado" in sit:
+            bg = "#F5F5F5"
+        else:
+            bg = "#FFFFFF"
+        return [f"background-color: {bg}"] * len(linha)
+
+    # Cor do texto da situacao
+    def _txt_status(val):
+        v = str(val).lower()
+        if "vencida" in v:
+            return "color: #C62828; font-weight: 700"
+        if "atencao" in v or "alerta" in v:
+            return "color: #E65100; font-weight: 700"
+        if "liberada" in v:
+            return "color: #2E7D32; font-weight: 600"
+        if "encerrado" in v:
+            return "color: #757575; font-weight: 500"
+        if "dentro do prazo" in v:
+            return "color: #1565C0; font-weight: 500"
+        if "em curso" in v:
+            return "color: #546E7A; font-weight: 500"
+        return ""
+
+    styler = df.style\
+        .apply(_cor_linha, axis=1)\
+        .map(_txt_status, subset=[col_status] if col_status in df.columns else [])\
+        .set_properties(**{
+            "border": "none",
+            "border-bottom": "1px solid #E0E0E0",
+            "padding": "8px 12px",
+            "font-size": "13px",
+            "font-family": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        })\
+        .set_table_styles([
+            {"selector": "th", "props": [
+                ("background-color", "#F5F5F5"),
+                ("color", "#424242"),
+                ("font-weight", "600"),
+                ("font-size", "12px"),
+                ("text-transform", "uppercase"),
+                ("letter-spacing", "0.5px"),
+                ("border-bottom", "2px solid #E0E0E0"),
+                ("padding", "10px 12px"),
+            ]},
+            {"selector": "td", "props": [
+                ("border", "none"),
+                ("border-bottom", "1px solid #ECECEC"),
+                ("padding", "8px 12px"),
+            ]},
+            {"selector": "", "props": [
+                ("border-collapse", "collapse"),
+                ("width", "100%"),
+            ]},
+        ])
+
+    return styler
