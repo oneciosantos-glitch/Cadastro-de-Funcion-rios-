@@ -98,7 +98,7 @@ def pagina_consultar(banco):
         st.caption(f"{len(df)} registro(s) \u00B7 atualizado "
                    f"{pd.Timestamp.now():%H:%M:%S}")
         st.dataframe(estilo.estilo_tabela(df),
-                     width="stretch", hide_index=True)
+                     use_container_width=True, hide_index=True)
 
     if tempo_real:
         st.fragment(desenhar, run_every=10)()
@@ -1344,18 +1344,9 @@ def pagina_dashboard(banco):
                 df_exp = df_exp[df_exp["Prazo"] == filtro_prazo]
 
             st.caption(f"{len(df_exp)} contrato(s) de experiencia")
-            # ProgressColumn requer streamlit>=1.33; usar NumberColumn como fallback
-            _col_cfg = {}
-            if hasattr(st.column_config, 'ProgressColumn'):
-                _col_cfg["Dias restantes"] = st.column_config.ProgressColumn(
-                    min_value=0, max_value=90, format="%d dias")
-            else:
-                _col_cfg["Dias restantes"] = st.column_config.NumberColumn(
-                    format="%d dias")
             st.dataframe(
                 estilo.estilo_tabela_saas(df_exp, tipo="experiencia"),
-                column_config=_col_cfg,
-                width="stretch", hide_index=True)
+                use_container_width=True, hide_index=True)
 
     # ========== TAB FERIAS ==========
     with tab_fer:
@@ -1381,7 +1372,7 @@ def pagina_dashboard(banco):
             st.caption(f"{len(df_fer)} funcionario(s) com alerta de ferias")
             st.dataframe(
                 estilo.estilo_tabela_saas(df_fer, tipo="ferias"),
-                width="stretch", hide_index=True)
+                use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -1456,7 +1447,7 @@ def pagina_dashboard(banco):
         c1, c2 = st.columns([2, 3])
         c1.bar_chart(por_loja[["Turnover %"]], color=col[3], height=240)
         c2.dataframe(por_loja.style.format({"Turnover %": "{:.1f}%"}),
-                     width="stretch")
+                     use_container_width=True)
 
 
 # ============================================================
