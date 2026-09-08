@@ -230,51 +230,7 @@ section[data-testid="stSidebar"] .stCaption {
     color: #bdc3c7 !important;
 }
 
-/* ----- alerta de ferias vencida ----- */
-div.alerta-ferias-vencida {
-    background: linear-gradient(135deg, #fdecea 0%, #f9e0dc 100%);
-    border: 2px solid #E74C3C;
-    border-radius: 14px;
-    padding: 20px 26px;
-    margin-bottom: 18px;
-    box-shadow: 0 3px 16px rgba(231, 76, 60, 0.18);
-}
-div.alerta-ferias-vencida h3 {
-    margin: 0 0 10px 0;
-    font-size: 20px;
-    font-weight: 700;
-    color: #c0392b;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-div.alerta-ferias-vencida .detalhe {
-    font-size: 14px;
-    color: #6b1a1a;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(231, 76, 60, 0.15);
-}
-div.alerta-ferias-vencida .detalhe:last-child {
-    border-bottom: none;
-}
-div.alerta-ferias-vencida .detalhe .lbl {
-    color: #943126;
-    font-weight: 500;
-    min-width: 160px;
-    display: inline-block;
-}
-div.alerta-ferias-vencida .detalhe .vlr {
-    color: #1a1a1a;
-    font-weight: 700;
-}
-div.alerta-ferias-vencida .icone-pulso {
-    display: inline-block;
-    animation: pulso_vermelho 1.5s ease-in-out infinite;
-}
-@keyframes pulso_vermelho {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.55; transform: scale(1.18); }
-}
+/* ----- alerta vencida removido (usuario nao quer ver vencidas) ----- */
 
 /* ----- alerta gozo proximo (30 dias) ----- */
 div.alerta-ferias-gozo-proximo {
@@ -497,20 +453,7 @@ def cartao_prazo_experiencia(prazo_dias, data_fim, dias_restantes, status_tipo):
         unsafe_allow_html=True)
 
 
-def alerta_ferias_vencida(funcionario, campos):
-    """Cartao vermelho pulsante para ferias vencidas."""
-    linhas = "".join(
-        f"<div class='detalhe'><span class='lbl'>{escape(str(r))}</span>"
-        f"<span class='vlr'>{escape(str(v))}</span></div>"
-        for r, v in campos)
-    st.markdown(
-        f"<div class='alerta-ferias-vencida'>"
-        f"<h3><span class='icone-pulso'>\U0001F6A8</span> "
-        f"Ferias VENCIDA</h3>"
-        f"<div class='detalhe'><span class='lbl'>Funcionario</span>"
-        f"<span class='vlr'>{escape(funcionario)}</span></div>"
-        f"{linhas}</div>",
-        unsafe_allow_html=True)
+# alerta_ferias_vencida REMOVIDO — usuario nao quer ver ferias vencidas no dashboard
 
 
 def alerta_ferias_gozo_proximo(funcionario, campos):
@@ -551,20 +494,18 @@ def secao_todos_prazos(titulo="Todos os prazos legais de experiencia"):
         unsafe_allow_html=True)
 
 
-def estilo_tabela(df, coluna_ferias="Ferias", coluna_exp="Status experiencia",
-                   coluna_vencida="Vencida"):
-    """Pinta as linhas conforme os eventos trabalhistas."""
+def estilo_tabela(df, coluna_ferias="Ferias", coluna_exp="Status experiencia"):
+    """Pinta as linhas conforme os eventos trabalhistas (sem vencida)."""
     def pintar(linha):
         cor = ""
-        venc = str(linha.get(coluna_vencida, ""))
         exp = str(linha.get(coluna_exp, ""))
         fer = str(linha.get(coluna_ferias, ""))
-        if venc == "Sim":
-            cor = "background-color: #FDECEA"
-        elif "atencao" in exp.lower() or "vence" in exp.lower() or "Encerrado" in exp:
+        if "atencao" in exp.lower() or "vence" in exp.lower() or "Encerrado" in exp:
             cor = "background-color: #FDF1DC"
-        elif "LIBERADA" in fer:
+        elif "liberada" in fer.lower():
             cor = "background-color: #E9F7EE"
+        elif "alerta" in fer.lower():
+            cor = "background-color: #FFF3E0"
         return [cor] * len(linha)
 
     return df.style.apply(pintar, axis=1)
@@ -576,6 +517,17 @@ def estilo_tabela_saas(df, tipo="experiencia"):
     tipo = 'experiencia' | 'ferias'
     Retorna Styler pronto para st.dataframe().
     Compativel com pandas 1.x e 2.x+.
+
+    Situacoes possiveis (experiencia):
+      - "Atencao - vence em X dia(s)"
+      - "Encerrado"
+      - "Dentro do prazo (X dias restantes)"
+
+    Situacoes possiveis (ferias):
+      - "Alerta - liberacao em X dia(s)"   (alerta 4 meses)
+      - "Liberada - Xd para gozo"         (liberada)
+      - "Proxima de liberar"
+      - "Em curso"
     """
     if df.empty:
         return df.style
@@ -585,14 +537,14 @@ def estilo_tabela_saas(df, tipo="experiencia"):
     # --- cores de fundo por status ---
     def _cor_linha(linha):
         sit = str(linha.get(col_status, "")).lower()
-        if "vencida" in sit:
-            bg = "#FFEBEE"
-        elif "atencao" in sit or "alerta" in sit:
+        if "alerta" in sit or "atencao" in sit:
             bg = "#FFF3E0"
         elif "liberada" in sit:
             bg = "#E8F5E9"
         elif "encerrado" in sit:
             bg = "#F5F5F5"
+        elif "proxima" in sit:
+            bg = "#FFF8E1"
         else:
             bg = "#FFFFFF"
         return [f"background-color: {bg}"] * len(linha)
@@ -600,9 +552,7 @@ def estilo_tabela_saas(df, tipo="experiencia"):
     # --- cor do texto da situacao ---
     def _txt_status(val):
         v = str(val).lower()
-        if "vencida" in v:
-            return "color: #C62828; font-weight: bold"
-        if "atencao" in v or "alerta" in v:
+        if "alerta" in v or "atencao" in v:
             return "color: #E65100; font-weight: bold"
         if "liberada" in v:
             return "color: #2E7D32; font-weight: bold"
@@ -610,6 +560,8 @@ def estilo_tabela_saas(df, tipo="experiencia"):
             return "color: #757575"
         if "dentro do prazo" in v:
             return "color: #1565C0"
+        if "proxima" in v:
+            return "color: #F57F17; font-weight: bold"
         return ""
 
     # --- monta Styler com maxima compatibilidade ---
