@@ -146,7 +146,7 @@ def contrato_experiencia(admissao, prazo_dias, ref=None):
     }
 
 
-def calcular_ferias(admissao, ref=None):
+def calcular_ferias(admissao, ref=None, ultimo_gozo=None):
     """Calcula ferias com as regras customizadas.
 
     Regras:
@@ -156,10 +156,20 @@ def calcular_ferias(admissao, ref=None):
     Alerta de 4 meses: quando faltam 4 meses para a liberacao,\n    para evitar que o colaborador ultrapasse o limite de gozo.
 
     Ferias vencidas: quando o periodo anterior encerrou sem que as ferias\n    fossem gozadas. O limite de gozo e o fim do periodo aquisitivo.
+
+    ultimo_gozo: data (date ou str 'YYYY-MM-DD') do inicio do ultimo gozo de ferias.
+    Se o ultimo gozo ocorreu dentro do periodo aquisitivo atual, as ferias daquele
+    periodo ja foram tiradas — o sistema avanca para o periodo seguinte e mostra
+    "Ja tirou este periodo" em vez de "Liberada".
     """
     ref = ref or date.today()
     meses_casa = meses_completos(admissao, ref)
     anos_casa = meses_casa // 12
+
+    # --- Converter ultimo_gozo para date se necessario ---
+    ug = None
+    if ultimo_gozo is not None:
+        ug = parse_data(ultimo_gozo)
 
     # --- Periodo atual ---
     if meses_casa < 24:
@@ -181,46 +191,63 @@ def calcular_ferias(admissao, ref=None):
 
     liberada = ref >= data_liberacao and ref <= fim_periodo
 
+    # --- Verificar se ferias ja foram tiradas neste periodo ---
+    ja_tirou = False
+    if ug is not None and inicio_periodo <= ug <= fim_periodo:
+        ja_tirou = True
+
+    # Se ja tirou neste periodo, avancar para o PROXIMO periodo
+    if ja_tirou:
+        proximo_inicio = add_meses(inicio_periodo, meses_periodo)
+        # Recalcular regra para o novo periodo
+        novos_meses_casa = meses_completos(admissao, ref)
+        if novos_meses_casa < meses_completos(admissao, proximo_inicio):
+            # Depois do primeiro ano completo
+            regra = "Mais de 1 ano (8 de 12)"
+            meses_periodo = 12
+            meses_liberacao = 8
+        elif meses_periodo == 24:
+            # Ainda no primeiro periodo de 24m
+            regra = "Menos de 1 ano (20 de 24)"
+            meses_periodo = 24
+            meses_liberacao = 20
+        else:
+            regra = "Mais de 1 ano (8 de 12)"
+            meses_periodo = 12
+            meses_liberacao = 8
+
+        inicio_periodo = proximo_inicio
+        fim_periodo = add_meses(inicio_periodo, meses_periodo)
+        data_liberacao = add_meses(inicio_periodo, meses_liberacao)
+        limite_gozo = fim_periodo
+        meses_cumpridos = meses_completos(inicio_periodo, ref)
+        liberada = ref >= data_liberacao and ref <= fim_periodo
+
     # --- Alerta de 4 meses antes da liberacao ---
-    # Para < 24 meses: alerta aos 16 meses (= 20 - 4)
-    # Para >= 24 meses: alerta aos 4 meses (= 8 - 4)
-    meses_ate_liberacao = meses_completos(ref, data_liberacao)
-    # Verificar se faltam <= 4 meses para liberacao (e ainda nao foi liberada)
     alerta_4_meses = (not liberada
                       and data_liberacao > ref
                       and (data_liberacao - ref).days <= 120)
 
     # --- Verificar periodo anterior (ferias vencidas) ---
-    # Vencida = o prazo de gozo do periodo anterior expirou
-    # (ref > fim_periodo e o periodo ainda nao foi liberado/gozado)
     vencida = False
     periodo_vencido_fim = None
 
-    # Para >= 24 meses: se ref > fim_periodo do ciclo anterior,
-    # as ferias do ciclo anterior venceram sem gozo.
-    # Detectamos verificando se o inicio do periodo atual e posterior
-    # ao aniversario anterior, ou seja, estamos em inicio < ref < lib
-    # e o limite de gozo do periodo anterior (= inicio atual) ja passou.
-    # Simplificacao: se inicio_periodo < ref E ref > limite do gozo anterior
-    # O gozo anterior = inicio_periodo (fim do periodo anterior = inicio do atual).
     if meses_casa >= 24:
-        # O inicio do periodo atual = fim do periodo anterior = limite de gozo anterior.
-        # Se ref > inicio_periodo e ainda nao foi liberada (ref < data_liberacao),
-        # entao o prazo de gozo do periodo ANTERIOR expirou.
         if inicio_periodo < ref and ref < data_liberacao:
             vencida = True
             periodo_vencido_fim = inicio_periodo
 
-    # Para < 24 meses: ferias vencem se ref ultrapassa o fim do periodo de 24 meses.
     if meses_casa < 24 and ref > fim_periodo:
         vencida = True
         periodo_vencido_fim = fim_periodo
 
-    # --- Situacao (sem usar vencida no texto visivel ao usuario) ---
-    # O usuario NAO quer ver "VENCIDA" no dashboard.
-    # No dashboard so aparecem: alerta_4_meses e liberadas.
-    # Vencida e tratada internamente para controle.
-    if alerta_4_meses and not liberada:
+    # --- Situacao ---
+    if ja_tirou and not liberada:
+        # Ferias ja foram tiradas no periodo anterior, novo periodo em curso
+        # Se o novo periodo ainda nao comecou (inicio no futuro), mostrar 0
+        meses_cumpridos_display = max(meses_cumpridos, 0)
+        situacao = f"Ja tirou este periodo ({meses_cumpridos_display}/{meses_liberacao})"
+    elif alerta_4_meses and not liberada:
         dias_lib = (data_liberacao - ref).days
         situacao = f"Alerta - liberacao em {dias_lib} dia(s)"
     elif liberada and not vencida:
@@ -237,8 +264,18 @@ def calcular_ferias(admissao, ref=None):
 
     proxima_vencer = (liberada and not vencida
                      and (limite_gozo - ref).days <= 30)
-    progresso = f"{meses_cumpridos}/{meses_liberacao}"
-    dias_proporcionais = round(meses_cumpridos * 2.5, 1)
+    progresso = f"{max(meses_cumpridos, 0)}/{meses_liberacao}"
+    dias_proporcionais = round(max(meses_cumpridos, 0) * 2.5, 1)
+
+    # Se ja tirou e novo periodo ainda nao esta liberado,
+    # NAO contar como liberada para metricas e alertas
+    if ja_tirou:
+        liberada = False
+        alerta_4_meses = (not liberada
+                          and data_liberacao > ref
+                          and (data_liberacao - ref).days <= 120)
+        proxima_vencer = False
+        meses_cumpridos = max(meses_cumpridos, 0)
 
     return {
         "regra": regra,
@@ -258,6 +295,7 @@ def calcular_ferias(admissao, ref=None):
         "proxima_vencer_gozo": proxima_vencer,
         "alerta_4_meses": alerta_4_meses,
         "situacao": situacao,
+        "ja_tirou_periodo": ja_tirou,
     }
 
 
