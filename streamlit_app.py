@@ -680,7 +680,7 @@ def _cartao_evento_ativo(reg, tipo_evento):
     if not inicio:
         return
 
-    dias = reg.get(cfg["campo_dias"]) or 0
+    dias = int(reg.get(cfg["campo_dias"]) or 0)
     retorno = reg.get(cfg["campo_retorno"])
     data_inicio = cal.parse_data(inicio)
     data_retorno = cal.parse_data(retorno)
@@ -715,7 +715,7 @@ def _cartao_evento_ativo(reg, tipo_evento):
         situacao_texto=sit_texto,
         situacao_tipo=sit_tipo,
         cor_barra=cfg["cor"],
-        cor_clara=cfg["cor_clara"],
+        cor_barra_clara=cfg["cor_clara"],
         progresso_pct=progresso,
     )
 
