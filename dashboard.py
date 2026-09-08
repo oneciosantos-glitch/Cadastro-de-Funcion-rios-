@@ -1,269 +1,340 @@
-"""Calculos de turnover, movimentacao e eventos para o dashboard."""
+"""Calculos de experiencia, ferias, CPF e datas."""
 
 from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 
-import pandas as pd
+PRAZOS_EXPERIENCIA = [30, 45, 60, 90]
 
-import calculos as cal
-from calculos import TIPOS_DESLIGAMENTO
+# ---- Tipos de desligamento ----
+TIPOS_DESLIGAMENTO = [
+    "Desligado com J/C",
+    "Desligado sem J/C",
+    "Abandono",
+    "Desistente",
+    "Rescisão Indireta",
+    "Pedido de Demissão",
+]
+
+# ---- Tipos de afastamento ----
+TIPOS_AFASTAMENTO = ["INSS", "Licença Maternidade"]
 
 
-def turnover_periodo(registros, meses, ref=None):
-    """Resumo de turnover em N meses."""
+def parse_data(valor):
+    """Converte string 'YYYY-MM-DD' ou Date para date."""
+    if isinstance(valor, date):
+        return valor
+    if isinstance(valor, str) and valor.strip():
+        return date.fromisoformat(valor.strip())
+    return None
+
+
+def fmt(d):
+    """Formata date como dd/mm/aaaa."""
+    return d.strftime("%d/%m/%Y") if d else "-"
+
+
+def add_meses(d, n):
+    """Soma n meses a uma data."""
+    return d + relativedelta(months=n)
+
+
+def meses_completos(inicio, ref=None):
+    """Quantos meses completos entre inicio e ref (hoje se None)."""
     ref = ref or date.today()
-    inicio = cal.add_meses(ref, -meses)
-
-    admissoes = 0
-    desligamentos = 0
-    for r in registros:
-        a = cal.parse_data(r["admissao"])
-        d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
-        if a and inicio <= a <= ref:
-            admissoes += 1
-        if d and inicio <= d <= ref:
-            desligamentos += 1
-
-    ativos = ativos_em_data(registros, ref)
-    quadro_atual = len(ativos)
-    quadro_medio = quadro_atual + (admissoes + desligamentos) // 2
-    quadro_medio = max(quadro_medio, 1)
-
-    turno = ((admissoes + desligamentos) / 2) / quadro_medio * 100
-
-    return {
-        "quadro_atual": quadro_atual,
-        "admissoes": admissoes,
-        "desligamentos": desligamentos,
-        "turnover_medio": round(turno, 1),
-        "quadro_medio": quadro_medio,
-    }
+    delta = relativedelta(ref, inicio)
+    return delta.years * 12 + delta.months
 
 
-def ativos_em_data(registros, ref):
-    """Retorna registros ativos na data ref."""
-    resultado = []
-    for r in registros:
-        a = cal.parse_data(r["admissao"])
-        if a and a <= ref:
-            d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
-            if d is None or d > ref:
-                resultado.append(r)
-    return resultado
+def calcular_retorno(inicio, dias):
+    """Calcula data de retorno a partir de inicio + qtd de dias."""
+    if not inicio or not dias:
+        return None
+    return inicio + timedelta(days=dias)
 
 
-def ativos(registros, ref=None):
+def contrato_experiencia(admissao, prazo_dias, ref=None):
+    """Retorna dict com dados do contrato de experiencia.
+
+    prazo_dias = 30 | 45 | 60 | 90
+    Etapas: 30 = unico | 45 = 45 | 60 = 30+30 | 90 = 45+45
+
+    Sempre retorna todos_os_prazos (45, 60, 90) com datas calculadas
+    a partir da admissao, independente do prazo contratado.
+    """
+    # CLT: o dia da admissao conta como dia 1 (contagem inclusiva)
+    # Por isso subtrai-se 1 do prazo para obter a data final
+    # Ex.: admissao 08/09/2026 + 45 dias -> 22/10/2026
+    def _fim_clt(inicio, dias):
+        return inicio + timedelta(days=dias - 1)
+
     ref = ref or date.today()
-    return ativos_em_data(registros, ref)
+    fim = _fim_clt(admissao, prazo_dias)
+    alerta = (fim - ref).days <= 7 and (fim - ref).days >= 0
+    encerrado = ref > fim  # no ultimo dia ainda nao esta encerrado
 
+    etapas = {30: "30", 45: "45", 60: "30 + 30", 90: "45 + 45"}
 
-def movimentacao_mensal(registros, meses, ref=None):
-    """DataFrame com admissoes, desligamentos, quadro e turnover por mes."""
-    ref = ref or date.today()
-    rows = []
-    for i in range(meses - 1, -1, -1):
-        m = cal.add_meses(ref, -i)
-        mes_str = m.strftime("%Y-%m")
-        mes_label = m.strftime("%b/%y")
+    dias_restantes = max((fim - ref).days, 0)
+    if encerrado:
+        situacao = "Encerrado"
+    elif alerta:
+        situacao = f"Atencao - vence em {dias_restantes} dia(s)"
+    else:
+        situacao = f"Dentro do prazo ({dias_restantes} dias restantes)"
 
-        adm = 0
-        desl = 0
-        for r in registros:
-            a = cal.parse_data(r["admissao"])
-            d = cal.parse_data(r.get("demissao")) if r.get("demissao") else None
-            if a and a.strftime("%Y-%m") == mes_str:
-                adm += 1
-            if d and d.strftime("%Y-%m") == mes_str:
-                desl += 1
+    # Prazos intermediarios com datas (do contrato selecionado)
+    prazos_intermediarios = []
+    if prazo_dias == 60:
+        p1_fim = _fim_clt(admissao, 30)
+        prazos_intermediarios.append((30, p1_fim))
+        prazos_intermediarios.append((60, fim))
+    elif prazo_dias == 90:
+        p1_fim = _fim_clt(admissao, 45)
+        prazos_intermediarios.append((45, p1_fim))
+        prazos_intermediarios.append((90, fim))
+    else:
+        prazos_intermediarios.append((prazo_dias, fim))
 
-        quadro_fim = len(ativos_em_data(registros, m))
-        quadro_med = max(quadro_fim + (adm + desl) // 2, 1)
-        turno = ((adm + desl) / 2) / quadro_med * 100
-
-        rows.append({
-            "Mes": mes_label, "Admissoes": adm,
-            "Desligamentos": desl, "Quadro no fim do mes": quadro_fim,
-            "Turnover %": round(turno, 1),
-            "Desligamentos %": round(desl / quadro_med * 100, 1),
-        })
-    return pd.DataFrame(rows).set_index("Mes")
-
-
-def turnover_por_loja(registros, meses, ref=None):
-    """DataFrame com turnover por loja."""
-    ref = ref or date.today()
-    lojas = sorted(set(r.get("loja", "") or "Sem loja" for r in registros))
-    rows = []
-    for loja in lojas:
-        regs = [r for r in registros if (r.get("loja", "") or "Sem loja") == loja]
-        t = turnover_periodo(regs, meses, ref)
-        rows.append({
-            "Loja": loja, "Quadro": t["quadro_atual"],
-            "Admissoes": t["admissoes"], "Desligamentos": t["desligamentos"],
-            "Turnover %": t["turnover_medio"],
-        })
-    if not rows:
-        return pd.DataFrame(columns=["Loja", "Quadro", "Admissoes",
-                                     "Desligamentos", "Turnover %"]).set_index("Loja")
-    return pd.DataFrame(rows).set_index("Loja")
-
-
-def por_categoria(registros, campo, label=None):
-    """Contagem por categoria (cargo, situacao etc.)."""
-    label = label or campo.capitalize()
-    cats = sorted(set(r.get(campo, "") or "Nenhum(a)" for r in registros))
-    rows = [{label: c, "Quantidade": sum(1 for r in registros
-                                        if (r.get(campo, "") or "Nenhum(a)") == c)}
-            for c in cats]
-    if not rows:
-        return pd.DataFrame(columns=[label, "Quantidade"]).set_index(label)
-    return pd.DataFrame(rows).set_index(label)
-
-
-def faixas_tempo_casa(registros, ref=None):
-    """Contagem por faixa de tempo de casa."""
-    ref = ref or date.today()
-    faixas = ["0-6m", "6-12m", "1-2a", "2-5a", "5-10a", "+10a"]
-    contagem = {f: 0 for f in faixas}
-    for r in registros:
-        a = cal.parse_data(r["admissao"])
-        if not a:
-            continue
-        meses = cal.meses_completos(a, ref)
-        if meses < 6:
-            contagem["0-6m"] += 1
-        elif meses < 12:
-            contagem["6-12m"] += 1
-        elif meses < 24:
-            contagem["1-2a"] += 1
-        elif meses < 60:
-            contagem["2-5a"] += 1
-        elif meses < 120:
-            contagem["5-10a"] += 1
+    # Todos os prazos legais de experiencia (45, 60, 90)
+    # calculados a partir da data de admissao, independente
+    # do contrato selecionado
+    todos_os_prazos = []
+    for p in [45, 60, 90]:
+        p_fim = _fim_clt(admissao, p)
+        p_dias_rest = max((p_fim - ref).days, 0)
+        p_encerrado = ref > p_fim  # no ultimo dia ainda nao esta encerrado
+        p_alerta = p_dias_rest <= 7 and not p_encerrado
+        if p == 60:
+            p_etapas = "30 + 30"
+            p_inter = [(30, _fim_clt(admissao, 30)),
+                       (60, p_fim)]
+        elif p == 90:
+            p_etapas = "45 + 45"
+            p_inter = [(45, _fim_clt(admissao, 45)),
+                       (90, p_fim)]
         else:
-            contagem["+10a"] += 1
-    return pd.DataFrame([{"Faixa": f, "Quantidade": v}
-                          for f, v in contagem.items()]).set_index("Faixa")
+            p_etapas = "45"
+            p_inter = [(45, p_fim)]
+        if p_encerrado:
+            p_sit = "Encerrado"
+        elif p_alerta:
+            p_sit = f"Atencao - vence em {p_dias_rest} dia(s)"
+        else:
+            p_sit = f"Dentro do prazo ({p_dias_rest} dias restantes)"
+        todos_os_prazos.append({
+            "prazo_dias": p,
+            "etapas": p_etapas,
+            "fim": p_fim,
+            "dias_restantes": p_dias_rest,
+            "encerrado": p_encerrado,
+            "alerta": p_alerta,
+            "situacao": p_sit,
+            "prazos_intermediarios": p_inter,
+        })
 
-
-def resumo_eventos(registros, ref=None):
-    ref = ref or date.today()
-    exp_30 = 0
-    exp_7 = 0
-    ferias_prox = 0
-    ferias_lib = 0
-    ferias_venc = 0
-    ferias_gozo_30 = 0
-    ferias_alerta_4m = 0
-    for r in registros:
-        if r.get("experiencia_dias"):
-            e = cal.contrato_experiencia(
-                cal.parse_data(r["admissao"]), r["experiencia_dias"], ref)
-            if e["dias_restantes"] <= 30:
-                exp_30 += 1
-            if e["alerta"]:
-                exp_7 += 1
-        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
-                                  r.get("ferias_ultimo_gozo"))
-        if f["liberada"]:
-            ferias_lib += 1
-        if f["vencida"]:
-            ferias_venc += 1
-        if f["proxima_vencer_gozo"]:
-            ferias_gozo_30 += 1
-        if f["alerta_4_meses"]:
-            ferias_alerta_4m += 1
-        if not f["liberada"]:
-            dias_lib = (f["data_liberacao"] - ref).days
-            if 0 < dias_lib <= 60:
-                ferias_prox += 1
     return {
-        "experiencia_30": exp_30,
-        "experiencia_7": exp_7,
-        "ferias_liberadas": ferias_lib,
-        "ferias_proximas": ferias_prox,
-        "ferias_vencidas": ferias_venc,
-        "ferias_gozo_30": ferias_gozo_30,
-        "ferias_alerta_4m": ferias_alerta_4m,
+        "prazo_dias": prazo_dias,
+        "etapas": etapas.get(prazo_dias, str(prazo_dias)),
+        "inicio": admissao,
+        "fim": fim,
+        "alerta": alerta,
+        "encerrado": encerrado,
+        "situacao": situacao,
+        "dias_restantes": dias_restantes,
+        "prazos_intermediarios": prazos_intermediarios,
+        "todos_os_prazos": todos_os_prazos,
     }
 
 
-def eventos_experiencia(registros, ref=None):
-    """Retorna DataFrame com TODOS os prazos de experiencia (30, 45, 60, 90)
-    para cada funcionario que possui contrato de experiencia.
-    Cada funcionario gera uma linha por prazo (30, 45, 60, 90)."""
+def calcular_ferias(admissao, ref=None, ultimo_gozo=None):
+    """Calcula ferias com as regras customizadas.
+
+    Regras:
+    - 1o periodo (< 24 meses de casa): periodo 24 meses, liberacao aos 20 meses
+    - Periodos seguintes (>= 24 meses de casa): periodo 12 meses, liberacao aos 8 meses
+
+    Alerta de 4 meses: quando faltam 4 meses para a liberacao,\n    para evitar que o colaborador ultrapasse o limite de gozo.
+
+    Ferias vencidas: quando o periodo anterior encerrou sem que as ferias\n    fossem gozadas. O limite de gozo e o fim do periodo aquisitivo.
+
+    ultimo_gozo: data (date ou str 'YYYY-MM-DD') do inicio do ultimo gozo de ferias.
+    Se o ultimo gozo ocorreu dentro do periodo aquisitivo atual, as ferias daquele
+    periodo ja foram tiradas — o sistema avanca para o periodo seguinte e mostra
+    "Ja tirou este periodo" em vez de "Liberada".
+    """
     ref = ref or date.today()
-    rows = []
-    for r in registros:
-        if not r.get("experiencia_dias"):
-            continue
-        # Pular funcionarios desligados
-        if r["situacao"] in cal.TIPOS_DESLIGAMENTO:
-            continue
-        adm = cal.parse_data(r["admissao"])
-        prazo_contratado = r["experiencia_dias"]
-        # Calcular dados do contrato para obter todos_os_prazos
-        e = cal.contrato_experiencia(adm, prazo_contratado, ref)
-        # Mapear TODOS os prazos legais (30, 45, 60, 90)
-        # com suas datas calculadas a partir da admissao
-        _fim_clt = lambda dias: adm + timedelta(days=dias - 1)
-        _etapas = {30: "30", 45: "45", 60: "30 + 30", 90: "45 + 45"}
-        todos_prazos = [30, 45, 60, 90]
-        for p in todos_prazos:
-            p_fim = _fim_clt(p)
-            p_dias_rest = max((p_fim - ref).days, 0)
-            p_encerrado = ref > p_fim
-            p_alerta = p_dias_rest <= 7 and not p_encerrado
-            if p_encerrado:
-                p_sit = "Encerrado"
-            elif p_alerta:
-                p_sit = f"Atencao - vence em {p_dias_rest} dia(s)"
-            else:
-                p_sit = f"Dentro do prazo ({p_dias_rest} dias restantes)"
-            rows.append({
-                "Matricula": r["matricula"],
-                "Funcionario": r["nome"],
-                "Loja": r.get("loja", ""),
-                "Cargo": r.get("cargo", ""),
-                "Prazo": f"{p}d ({_etapas.get(p, str(p))})",
-                "Fim": cal.fmt(p_fim),
-                "Dias restantes": p_dias_rest,
-                "Situacao": p_sit,
-            })
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+    meses_casa = meses_completos(admissao, ref)
+    anos_casa = meses_casa // 12
+
+    # --- Converter ultimo_gozo para date se necessario ---
+    ug = None
+    if ultimo_gozo is not None:
+        ug = parse_data(ultimo_gozo)
+
+    # --- Periodo atual ---
+    if meses_casa < 24:
+        regra = "Menos de 1 ano (20 de 24)"
+        inicio_periodo = admissao
+        meses_periodo = 24
+        meses_liberacao = 20
+    else:
+        regra = "Mais de 1 ano (8 de 12)"
+        aniversario = add_meses(admissao, anos_casa * 12)
+        inicio_periodo = aniversario
+        meses_periodo = 12
+        meses_liberacao = 8
+
+    fim_periodo = add_meses(inicio_periodo, meses_periodo)
+    data_liberacao = add_meses(inicio_periodo, meses_liberacao)
+    limite_gozo = fim_periodo
+    meses_cumpridos = meses_completos(inicio_periodo, ref)
+
+    liberada = ref >= data_liberacao and ref <= fim_periodo
+
+    # --- Verificar se ferias ja foram tiradas neste periodo ---
+    ja_tirou = False
+    if ug is not None and inicio_periodo <= ug <= fim_periodo:
+        ja_tirou = True
+
+    # Se ja tirou neste periodo, avancar para o PROXIMO periodo
+    if ja_tirou:
+        proximo_inicio = add_meses(inicio_periodo, meses_periodo)
+        # Recalcular regra para o novo periodo
+        novos_meses_casa = meses_completos(admissao, ref)
+        if novos_meses_casa < meses_completos(admissao, proximo_inicio):
+            # Depois do primeiro ano completo
+            regra = "Mais de 1 ano (8 de 12)"
+            meses_periodo = 12
+            meses_liberacao = 8
+        elif meses_periodo == 24:
+            # Ainda no primeiro periodo de 24m
+            regra = "Menos de 1 ano (20 de 24)"
+            meses_periodo = 24
+            meses_liberacao = 20
+        else:
+            regra = "Mais de 1 ano (8 de 12)"
+            meses_periodo = 12
+            meses_liberacao = 8
+
+        inicio_periodo = proximo_inicio
+        fim_periodo = add_meses(inicio_periodo, meses_periodo)
+        data_liberacao = add_meses(inicio_periodo, meses_liberacao)
+        limite_gozo = fim_periodo
+        meses_cumpridos = meses_completos(inicio_periodo, ref)
+        liberada = ref >= data_liberacao and ref <= fim_periodo
+
+    # --- Alerta de 4 meses antes da liberacao ---
+    alerta_4_meses = (not liberada
+                      and data_liberacao > ref
+                      and (data_liberacao - ref).days <= 120)
+
+    # --- Verificar periodo anterior (ferias vencidas) ---
+    vencida = False
+    periodo_vencido_fim = None
+
+    if meses_casa >= 24:
+        if inicio_periodo < ref and ref < data_liberacao:
+            vencida = True
+            periodo_vencido_fim = inicio_periodo
+
+    if meses_casa < 24 and ref > fim_periodo:
+        vencida = True
+        periodo_vencido_fim = fim_periodo
+
+    # --- Situacao ---
+    if ja_tirou and not liberada:
+        # Ferias ja foram tiradas no periodo anterior, novo periodo em curso
+        # Se o novo periodo ainda nao comecou (inicio no futuro), mostrar 0
+        meses_cumpridos_display = max(meses_cumpridos, 0)
+        situacao = f"Ja tirou este periodo ({meses_cumpridos_display}/{meses_liberacao})"
+    elif alerta_4_meses and not liberada:
+        dias_lib = (data_liberacao - ref).days
+        situacao = f"Alerta - liberacao em {dias_lib} dia(s)"
+    elif liberada and not vencida:
+        dias_restantes_gozo = (limite_gozo - ref).days
+        situacao = f"Liberada - {dias_restantes_gozo}d para gozo"
+    elif liberada and vencida:
+        situacao = "Liberada (periodo anterior pendente)"
+    elif vencida and not liberada:
+        situacao = "Periodo anterior vencido"
+    elif meses_cumpridos >= meses_liberacao - 2:
+        situacao = "Proxima de liberar"
+    else:
+        situacao = "Em curso"
+
+    proxima_vencer = (liberada and not vencida
+                     and (limite_gozo - ref).days <= 30)
+    progresso = f"{max(meses_cumpridos, 0)}/{meses_liberacao}"
+    dias_proporcionais = round(max(meses_cumpridos, 0) * 2.5, 1)
+
+    # Se ja tirou e novo periodo ainda nao esta liberado,
+    # NAO contar como liberada para metricas e alertas
+    if ja_tirou:
+        liberada = False
+        alerta_4_meses = (not liberada
+                          and data_liberacao > ref
+                          and (data_liberacao - ref).days <= 120)
+        proxima_vencer = False
+        meses_cumpridos = max(meses_cumpridos, 0)
+
+    return {
+        "regra": regra,
+        "tempo_servico_meses": meses_casa,
+        "anos_casa": anos_casa,
+        "inicio_periodo": inicio_periodo,
+        "fim_periodo": fim_periodo,
+        "meses_periodo": meses_periodo,
+        "meses_liberacao": meses_liberacao,
+        "data_liberacao": data_liberacao,
+        "limite_gozo": limite_gozo,
+        "meses_cumpridos": meses_cumpridos,
+        "progresso": progresso,
+        "dias_proporcionais": dias_proporcionais,
+        "liberada": liberada,
+        "vencida": vencida,
+        "proxima_vencer_gozo": proxima_vencer,
+        "alerta_4_meses": alerta_4_meses,
+        "situacao": situacao,
+        "ja_tirou_periodo": ja_tirou,
+    }
 
 
-def eventos_ferias(registros, ref=None):
-    """Retorna DataFrame apenas com colaboradores em alerta de 4 meses
-    ou com ferias liberadas. NAO mostra ferias vencidas."""
-    ref = ref or date.today()
-    rows = []
-    for r in ativos(registros, ref):
-        f = cal.calcular_ferias(cal.parse_data(r["admissao"]), ref,
-                                  r.get("ferias_ultimo_gozo"))
-        # Mostrar APENAS: alerta_4_meses ou liberada (sem vencida)
-        # Se ja tirou este periodo, NAO mostrar
-        if f.get("ja_tirou_periodo"):
-            continue
-        if not (f["alerta_4_meses"] or f["liberada"]):
-            continue
-        # Se vencida, NAO mostrar mesmo que tenha alerta
-        if f["vencida"] and not f["liberada"]:
-            continue
-        alerta_4m_txt = "Sim" if f["alerta_4_meses"] else "Nao"
-        dias_lib = (f["data_liberacao"] - ref).days if f["data_liberacao"] > ref else 0
-        dias_gozo = (f["limite_gozo"] - ref).days
-        rows.append({
-            "Matricula": r["matricula"],
-            "Funcionario": r["nome"],
-            "Loja": r.get("loja", ""),
-            "Cargo": r.get("cargo", ""),
-            "Regra": f["regra"],
-            "Periodo": f"{cal.fmt(f['inicio_periodo'])} a {cal.fmt(f['fim_periodo'])}",
-            "Liberacao": cal.fmt(f["data_liberacao"]),
-            "Limite gozo": cal.fmt(f["limite_gozo"]),
-            "Progresso": f["progresso"],
-            "Dias prop.": f["dias_proporcionais"],
-            "Alerta 4 meses": alerta_4m_txt,
-            "Situacao": f["situacao"],
-        })
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+def situacao_por_evento(tipo_evento):
+    """Retorna a situacao correspondente ao tipo de evento trabalhista."""
+    mapa = {
+        "ferias": "Está de Férias",
+        "licenca_maternidade": "Licença Maternidade",
+        "afastamento_inss": "Afastado INSS",
+    }
+    return mapa.get(tipo_evento, "Ativo")
+
+
+def cpf_valido(cpf):
+    """Valida CPF pelos digitos verificadores."""
+    cpf_limpo = ''.join(filter(str.isdigit, str(cpf)))
+    if len(cpf_limpo) != 11 or cpf_limpo == cpf_limpo[0] * 11:
+        return False
+    for i in range(9, 11):
+        soma = sum(int(cpf_limpo[j]) * (i + 1 - j) for j in range(i))
+        dig = 11 - soma % 11
+        if dig >= 10:
+            dig = 0
+        if int(cpf_limpo[i]) != dig:
+            return False
+    return True
+
+
+def formatar_cpf(cpf):
+    """Formata CPF como XXX.XXX.XXX-XX."""
+    d = ''.join(filter(str.isdigit, str(cpf)))
+    return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:11]}" if len(d) == 11 else cpf
+
+
+def formatar_telefone(tel):
+    """Formata telefone como (XX) XXXXX-XXXX se possivel."""
+    d = ''.join(filter(str.isdigit, str(tel)))
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:11]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:10]}"
+    return tel
