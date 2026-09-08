@@ -1452,14 +1452,17 @@ def pagina_dashboard(banco):
     # --- Alertas visuais de ferias (so gozo proximo e 4 meses, SEM vencidas) ---
     gozo_30 = [r for r in dash.ativos(registros, hoje)
                if cal.calcular_ferias(
-                   cal.parse_data(r["admissao"]), hoje)["proxima_vencer_gozo"]]
+                   cal.parse_data(r["admissao"]), hoje,
+                   r.get("ferias_ultimo_gozo"))["proxima_vencer_gozo"]]
     alerta_4m = [r for r in dash.ativos(registros, hoje)
                 if cal.calcular_ferias(
-                    cal.parse_data(r["admissao"]), hoje)["alerta_4_meses"]]
+                    cal.parse_data(r["admissao"]), hoje,
+                    r.get("ferias_ultimo_gozo"))["alerta_4_meses"]]
 
     if gozo_30:
         for r in gozo_30:
-            f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
+            f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje,
+                                     r.get("ferias_ultimo_gozo"))
             dias_restantes = (f["limite_gozo"] - hoje).days
             estilo.alerta_ferias_gozo_proximo(
                 f"{r['matricula']} \u00B7 {r['nome']} \u00B7 "
@@ -1470,7 +1473,8 @@ def pagina_dashboard(banco):
                  ("Dias proporcionais", f"{f['dias_proporcionais']}")])
     if alerta_4m:
         for r in alerta_4m:
-            f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje)
+            f = cal.calcular_ferias(cal.parse_data(r["admissao"]), hoje,
+                                     r.get("ferias_ultimo_gozo"))
             dias_lib = (f["data_liberacao"] - hoje).days
             estilo.alerta_ferias_4_meses(
                 f"{r['matricula']} \u00B7 {r['nome']} \u00B7 "
