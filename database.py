@@ -92,6 +92,7 @@ class Banco:
                 ferias_inicio TEXT DEFAULT NULL,
                 ferias_dias INTEGER DEFAULT NULL,
                 ferias_retorno TEXT DEFAULT NULL,
+                ferias_ultimo_gozo TEXT DEFAULT NULL,
                 licenca_maternidade_inicio TEXT DEFAULT NULL,
                 licenca_maternidade_dias INTEGER DEFAULT NULL,
                 licenca_maternidade_retorno TEXT DEFAULT NULL,
@@ -127,6 +128,7 @@ class Banco:
             "afastamento_inicio": "TEXT DEFAULT NULL",
             "afastamento_dias": "INTEGER DEFAULT NULL",
             "afastamento_retorno": "TEXT DEFAULT NULL",
+            "ferias_ultimo_gozo": "TEXT DEFAULT NULL",
         }
         for col, definicao in novas.items():
             if col not in cols:
